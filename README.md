@@ -46,18 +46,21 @@ The model scores the transaction **before** the Razorpay checkout modal ever ope
 
 ## Key design choice: no LLM in the hot path
 
-This system deliberately uses a small, structured **XGBoost** classifier instead of an LLM for scoring. Checkout is a latency-sensitive path — a real payment decision needs to happen in single-digit milliseconds, not the hundreds of milliseconds to seconds an LLM call would add, and a numeric fraud model has no need for the language-reasoning capability an LLM provides. XGBoost on ~15 structured features gets sub-100ms inference (measured ~3ms per call) with strong accuracy (ROC-AUC 0.99), which is what a synchronous "block before payment" decision requires.
+This system deliberately uses a small, structured **XGBoost** classifier instead of an LLM for scoring. Checkout is a latency-sensitive path — a real payment decision needs to happen in single-digit milliseconds, not the hundreds of milliseconds to seconds an LLM call would add, and a numeric fraud model has no need for the language-reasoning capability an LLM provides. XGBoost on ~29 structured features gets sub-100ms inference (measured ~3ms per call) with strong accuracy (ROC-AUC 0.98), which is what a synchronous "block before payment" decision requires.
 
 ## Model metrics
 
-Trained on an imbalanced dataset (~0.5% fraud rate), evaluated on a held-out test split:
+Trained on the real Kaggle "Credit Card Fraud Detection" dataset (`model/creditcard.csv`, 284,807 transactions, 492 fraud / 0.173%), evaluated on a held-out test split:
 
 | Metric | Value |
 |---|---|
-| ROC-AUC | 0.99 |
+| ROC-AUC | 0.98 |
+| Precision | 0.61 |
+| Recall | 0.88 |
+| F1 | 0.72 |
 | Inference latency | ~3ms per transaction (single-row `predict_proba`) |
 
-(Run `python model/train.py` to reproduce full precision/recall/F1/confusion-matrix output.)
+(Run `python model/train.py` to reproduce full precision/recall/F1/confusion-matrix output. If `model/creditcard.csv` is absent, training falls back to a synthetic imbalanced dataset instead.)
 
 ## Setup & run
 
