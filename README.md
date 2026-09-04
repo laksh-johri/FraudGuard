@@ -30,7 +30,7 @@ Traditional fraud prevention leans on static, hand-written rules ("block if amou
                           ▼
                  ┌────────────────┐
                  │ Decision point  │
-                 │ proba >= 0.5 ?  │
+                 │ final_risk>0.5? │
                  └───┬────────┬────┘
                      │        │
               yes ───┘        └─── no

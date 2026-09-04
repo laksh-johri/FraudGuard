@@ -10,9 +10,11 @@ Loads the XGBoost model trained by model/train.py and exposes:
 """
 
 import json
+import threading
 import time
+from collections import defaultdict, deque
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List
 
 import joblib
 import numpy as np
@@ -29,6 +31,82 @@ FEATURE_STATS_PATH = ARTIFACTS_DIR / "feature_stats.json"
 
 FRAUD_THRESHOLD = 0.5
 TOP_FEATURES_COUNT = 4
+
+# --- Velocity features (in-memory, process-local) ---------------------------
+#
+# Real fraud systems layer cheap, stateful "velocity" signals (how often is
+# this card/user transacting, and how does this amount compare to what's
+# normal for them?) on top of a per-transaction ML score, because the model
+# is trained on a single static row and has no memory of what happened a few
+# seconds ago on the same card. We keep a tiny in-memory store keyed by
+# card/user id: a rolling deque of recent transaction timestamps (for
+# txn_count_last_60s) and a running sum/count (for amount_vs_avg). This is
+# process-local and resets on restart -- fine for a demo/single-instance
+# backend, but a production system would back this with Redis or similar so
+# velocity state survives restarts and is shared across instances.
+VELOCITY_WINDOW_SECONDS = 60.0
+DEFAULT_ENTITY_ID = "demo_user"
+ID_KEYS = ("id", "card_id", "user_id")
+
+_velocity_lock = threading.Lock()
+_txn_timestamps: Dict[str, deque] = defaultdict(deque)
+_amount_totals: Dict[str, Dict[str, float]] = defaultdict(lambda: {"sum": 0.0, "count": 0})
+
+
+def _entity_id(data: Dict[str, Any]) -> str:
+    for key in ID_KEYS:
+        if key in data and data[key] not in (None, ""):
+            return str(data[key])
+    return DEFAULT_ENTITY_ID
+
+
+def compute_velocity_features(entity_id: str, amount: float) -> tuple[int, float]:
+    """Update and read this entity's velocity state for one incoming transaction.
+
+    txn_count_last_60s: number of transactions from this id in the trailing
+    60-second window, including the current one.
+    amount_vs_avg: this amount divided by the entity's running average amount
+    *before* this transaction (1.0 on the first-ever transaction for an id,
+    when there's no history yet to compare against).
+    """
+    now = time.time()
+    with _velocity_lock:
+        timestamps = _txn_timestamps[entity_id]
+        timestamps.append(now)
+        cutoff = now - VELOCITY_WINDOW_SECONDS
+        while timestamps and timestamps[0] < cutoff:
+            timestamps.popleft()
+        txn_count_last_60s = len(timestamps)
+
+        totals = _amount_totals[entity_id]
+        if totals["count"] > 0:
+            running_avg = totals["sum"] / totals["count"]
+            amount_vs_avg = amount / running_avg if running_avg > 0 else 1.0
+        else:
+            amount_vs_avg = 1.0
+        totals["sum"] += amount
+        totals["count"] += 1
+
+    return txn_count_last_60s, amount_vs_avg
+
+
+def compute_rule_score(txn_count_last_60s: int, amount_vs_avg: float) -> float:
+    """Cheap, explainable rule layer that catches velocity-shaped fraud the
+    static per-row model can't see (it has no notion of "recently" or
+    "usually" -- it only sees the columns of one transaction).
+
+    Two independent sub-scores, each saturating at 1.0:
+      - velocity_score: climbs with transactions in the trailing 60s window.
+        The first transaction contributes 0; by the 6th in-window
+        transaction it's maxed out (a plausible card-testing/bot pattern).
+      - amount_score: climbs with how far this amount deviates (in either
+        direction) from the entity's running average; 5x (or 1/5x) the
+        average amount maxes it out.
+    rule_score is the max of the two, so either signal alone can flag risk.
+    """
+    velocity_score = min(1.0, max(0, txn_count_last_60s - 1) / 5.0)
+    amount_score = min(1.0, abs(amount_vs_avg - 1.0) / 4.0)
+    return max(velocity_score, amount_score)
 
 # SHAP TreeExplainer benchmarks at ~3ms/call on this model (measured), well
 # inside a real-time budget on top of the ~2-3ms predict_proba call. If a
@@ -148,8 +226,13 @@ def load_artifacts():
     print(f"[explain] mode = {explain_mode}")
 
 
-class Transaction(RootModel[Dict[str, float]]):
-    """Feature name -> value, e.g. {"f0": 0.12, ..., "Amount": 59.99}"""
+class Transaction(RootModel[Dict[str, Any]]):
+    """Feature name -> value, e.g. {"f0": 0.12, ..., "Amount": 59.99}.
+
+    May optionally include a non-numeric "id" (or "card_id" / "user_id") key
+    identifying the card/user for velocity tracking; requests without one are
+    all attributed to a single shared demo identity.
+    """
 
 
 class FeatureContribution(BaseModel):
@@ -160,7 +243,12 @@ class FeatureContribution(BaseModel):
 
 
 class PredictionResponse(BaseModel):
-    fraud_probability: float
+    fraud_probability: float  # alias for model_score, kept for existing frontend compatibility
+    model_score: float
+    rule_score: float
+    final_risk: float
+    txn_count_last_60s: int
+    amount_vs_avg: float
     is_fraud: bool
     latency_ms: float
     top_features: List[FeatureContribution] = []
@@ -286,10 +374,28 @@ def predict(transaction: Transaction):
     if missing:
         raise HTTPException(status_code=422, detail=f"Missing features: {missing}")
 
-    row = pd.DataFrame([[data[f] for f in feature_names]], columns=feature_names)
+    row = pd.DataFrame([[float(data[f]) for f in feature_names]], columns=feature_names)
 
+    # Full hot-path timing: model inference AND the velocity/rule layer both
+    # count, since both run synchronously before a real system would let a
+    # transaction through. See compute_rule_score's docstring for why we
+    # blend a rule score in at all instead of trusting the model alone.
     start = time.perf_counter()
-    proba = float(model.predict_proba(row)[0, 1])
+
+    model_score = float(model.predict_proba(row)[0, 1])
+
+    entity_id = _entity_id(data)
+    txn_count_last_60s, amount_vs_avg = compute_velocity_features(entity_id, float(data["Amount"]))
+    rule_score = compute_rule_score(txn_count_last_60s, amount_vs_avg)
+
+    # Hybrid score: take whichever layer is more suspicious. The model is
+    # strong on the static, per-row patterns it was trained on; the rule
+    # layer catches velocity-shaped abuse (rapid-fire or wildly off-average
+    # transactions) that a single static row can never encode. Neither layer
+    # can veto the other's alarm -- max() means either one flagging risk is
+    # enough to flag the transaction.
+    final_risk = max(model_score, rule_score)
+
     latency_ms = (time.perf_counter() - start) * 1000
 
     # Explanation is computed after the latency-critical block/allow decision
@@ -297,8 +403,13 @@ def predict(transaction: Transaction):
     top_features = explain_transaction(row, data)
 
     return PredictionResponse(
-        fraud_probability=proba,
-        is_fraud=proba >= FRAUD_THRESHOLD,
+        fraud_probability=model_score,
+        model_score=model_score,
+        rule_score=round(rule_score, 4),
+        final_risk=round(final_risk, 4),
+        txn_count_last_60s=txn_count_last_60s,
+        amount_vs_avg=round(amount_vs_avg, 4),
+        is_fraud=final_risk > FRAUD_THRESHOLD,
         latency_ms=round(latency_ms, 3),
         top_features=top_features,
     )
