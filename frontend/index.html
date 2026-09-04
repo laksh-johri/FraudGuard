@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Real-Time Fraud Detection</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #2a2e38;
+    --text: #e6e8ec;
+    --muted: #8b8f9a;
+    --green: #3ddc84;
+    --red: #ff5c5c;
+    --accent: #5b8cff;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    padding: 24px;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+  .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    padding: 8px 14px;
+    font-size: 13px;
+    cursor: pointer;
+  }
+  button.secondary { background: #2a2e38; }
+  button:disabled { opacity: 0.5; cursor: not-allowed; }
+  input[type=text] {
+    background: #0f1115;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 6px;
+    padding: 8px;
+    font-size: 13px;
+    width: 220px;
+  }
+  .stats { display: flex; gap: 24px; margin-top: 14px; }
+  .stat { font-size: 13px; color: var(--muted); }
+  .stat b { display: block; font-size: 20px; color: var(--text); }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
+  tr.fraud { background: rgba(255, 92, 92, 0.08); }
+  .badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+  .badge.fraud { background: rgba(255, 92, 92, 0.15); color: var(--red); }
+  .badge.ok { background: rgba(61, 220, 132, 0.15); color: var(--green); }
+  .table-wrap { max-height: 480px; overflow: auto; }
+  .status { font-size: 12px; margin-top: 8px; color: var(--muted); }
+  .status.error { color: var(--red); }
+</style>
+</head>
+<body>
+
+<h1>Real-Time Fraud Detection</h1>
+<div class="sub">Streams simulated transactions to the FastAPI backend and scores each one with the trained XGBoost model.</div>
+
+<div class="panel">
+  <div class="controls">
+    <label style="font-size:13px;color:var(--muted)">API URL</label>
+    <input type="text" id="apiUrl" value="http://127.0.0.1:8000">
+    <button id="scoreOnceBtn">Score One Transaction</button>
+    <button id="streamBtn" class="secondary">Start Live Stream</button>
+    <button id="clearBtn" class="secondary">Clear</button>
+  </div>
+  <div class="stats">
+    <div class="stat"><b id="statTotal">0</b>Total Scored</div>
+    <div class="stat"><b id="statFraud">0</b>Flagged Fraud</div>
+    <div class="stat"><b id="statRate">0%</b>Fraud Rate</div>
+    <div class="stat"><b id="statLatency">-</b>Avg Latency (ms)</div>
+  </div>
+  <div id="status" class="status">Idle. Set the API URL and click "Score One Transaction" or start the live stream.</div>
+</div>
+
+<div class="panel">
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Amount</th>
+          <th>Fraud Probability</th>
+          <th>Verdict</th>
+          <th>Latency (ms)</th>
+        </tr>
+      </thead>
+      <tbody id="feed"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const apiUrlInput = document.getElementById('apiUrl');
+const scoreOnceBtn = document.getElementById('scoreOnceBtn');
+const streamBtn = document.getElementById('streamBtn');
+const clearBtn = document.getElementById('clearBtn');
+const statusEl = document.getElementById('status');
+const feedEl = document.getElementById('feed');
+
+const statTotal = document.getElementById('statTotal');
+const statFraud = document.getElementById('statFraud');
+const statRate = document.getElementById('statRate');
+const statLatency = document.getElementById('statLatency');
+
+let total = 0, fraudCount = 0, latencySum = 0;
+let streaming = false;
+let streamTimer = null;
+
+function apiBase() {
+  return apiUrlInput.value.trim().replace(/\/$/, '');
+}
+
+function setStatus(msg, isError) {
+  statusEl.textContent = msg;
+  statusEl.className = 'status' + (isError ? ' error' : '');
+}
+
+function updateStats() {
+  statTotal.textContent = total;
+  statFraud.textContent = fraudCount;
+  statRate.textContent = total ? ((fraudCount / total) * 100).toFixed(1) + '%' : '0%';
+  statLatency.textContent = total ? (latencySum / total).toFixed(2) : '-';
+}
+
+function addRow(amount, proba, isFraud, latencyMs) {
+  const tr = document.createElement('tr');
+  if (isFraud) tr.classList.add('fraud');
+  const time = new Date().toLocaleTimeString();
+  tr.innerHTML = `
+    <td>${time}</td>
+    <td>$${amount.toFixed(2)}</td>
+    <td>${(proba * 100).toFixed(2)}%</td>
+    <td><span class="badge ${isFraud ? 'fraud' : 'ok'}">${isFraud ? 'FRAUD' : 'OK'}</span></td>
+    <td>${latencyMs.toFixed(3)}</td>
+  `;
+  feedEl.prepend(tr);
+  while (feedEl.rows.length > 200) feedEl.deleteRow(-1);
+}
+
+async function scoreOnce() {
+  const base = apiBase();
+  try {
+    const sampleRes = await fetch(`${base}/sample`);
+    if (!sampleRes.ok) throw new Error(`GET /sample failed: ${sampleRes.status}`);
+    const transaction = await sampleRes.json();
+
+    const predictRes = await fetch(`${base}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(transaction),
+    });
+    if (!predictRes.ok) throw new Error(`POST /predict failed: ${predictRes.status}`);
+    const result = await predictRes.json();
+
+    total += 1;
+    if (result.is_fraud) fraudCount += 1;
+    latencySum += result.latency_ms;
+    updateStats();
+    addRow(transaction.Amount, result.fraud_probability, result.is_fraud, result.latency_ms);
+    setStatus(`Last scored at ${new Date().toLocaleTimeString()}.`, false);
+  } catch (err) {
+    setStatus(err.message, true);
+    stopStream();
+  }
+}
+
+function startStream() {
+  streaming = true;
+  streamBtn.textContent = 'Stop Live Stream';
+  streamTimer = setInterval(scoreOnce, 1000);
+  scoreOnce();
+}
+
+function stopStream() {
+  streaming = false;
+  streamBtn.textContent = 'Start Live Stream';
+  if (streamTimer) clearInterval(streamTimer);
+  streamTimer = null;
+}
+
+scoreOnceBtn.addEventListener('click', scoreOnce);
+streamBtn.addEventListener('click', () => (streaming ? stopStream() : startStream()));
+clearBtn.addEventListener('click', () => {
+  feedEl.innerHTML = '';
+  total = 0; fraudCount = 0; latencySum = 0;
+  updateStats();
+  setStatus('Cleared.', false);
+});
+</script>
+
+</body>
+</html>
