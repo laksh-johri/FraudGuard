@@ -46,7 +46,7 @@ The model scores the transaction **before** the Razorpay checkout modal ever ope
 
 ## Key design choice: no LLM in the hot path
 
-This system deliberately uses a small, structured **XGBoost** classifier instead of an LLM for scoring. Checkout is a latency-sensitive path — a real payment decision needs to happen in single-digit milliseconds, not the hundreds of milliseconds to seconds an LLM call would add, and a numeric fraud model has no need for the language-reasoning capability an LLM provides. XGBoost on ~29 structured features gets sub-100ms inference (measured ~1.6ms per call) with strong accuracy (ROC-AUC 0.98), which is what a synchronous "block before payment" decision requires.
+This system deliberately uses a small, structured **XGBoost** classifier instead of an LLM for scoring. Checkout is a latency-sensitive path — a real payment decision needs to happen in single-digit milliseconds, not the hundreds of milliseconds to seconds an LLM call would add, and a numeric fraud model has no need for the language-reasoning capability an LLM provides. XGBoost on ~29 structured features gets sub-100ms inference (measured p50 2.13ms, p99 3.84ms across 1000 requests through the full scoring path) with strong accuracy (ROC-AUC 0.98), which is what a synchronous "block before payment" decision requires.
 
 ## Model metrics
 
@@ -59,7 +59,6 @@ Trained on the real Kaggle "Credit Card Fraud Detection" dataset (`model/creditc
 | Precision | 0.61 |
 | Recall | 0.88 |
 | F1 | 0.72 |
-| Inference latency | ~1.6ms per transaction (single-row `predict_proba`) |
 
 Confusion matrix on the held-out test split ([[TN, FP], [FN, TP]]):
 
@@ -69,6 +68,20 @@ Confusion matrix on the held-out test split ([[TN, FP], [FN, TP]]):
 ```
 
 (Run `python model/train.py` to reproduce this output. If `model/creditcard.csv` is absent, training falls back to a synthetic imbalanced dataset instead.)
+
+### Latency
+
+`python model/benchmark_latency.py` fires 1000 single-row predictions through the actual scoring path (model inference + the velocity/rule layer, same code the API runs) and reports:
+
+| Percentile | Latency |
+|---|---|
+| min | 1.79ms |
+| p50 | 2.13ms |
+| p95 | 3.07ms |
+| p99 | 3.84ms |
+| max | 7.14ms |
+
+Saved to `model/artifacts/latency_stats.json`; rerun the script to reproduce on your own hardware. The backend also exposes `GET /metrics` for a live view of p50/p95/p99 over the requests actually served by the running process this session.
 
 ## Setup & run
 
@@ -90,6 +103,14 @@ python generate_shap_plot.py
 
 Saves `model/artifacts/shap_feature_importance.png` (falls back to a `feature_importances_` bar chart if SHAP errors or times out).
 
+Optionally, benchmark inference latency:
+
+```bash
+python benchmark_latency.py
+```
+
+Saves `model/artifacts/latency_stats.json` with p50/p95/p99/min/max over 1000 requests through the real scoring path.
+
 ### 2. Backend
 
 ```bash
@@ -101,6 +122,7 @@ uvicorn main:app --reload
 Serves the API at `http://127.0.0.1:8000`:
 
 - `GET /health` — liveness check
+- `GET /metrics` — running p50/p95/p99/min/max latency_ms over recent /predict calls this session
 - `GET /features` — ordered feature list the model expects
 - `GET /sample` — a randomly generated transaction for demo/streaming (`?force=fraud` / `?force=legit` for reliable demo outcomes)
 - `POST /predict` — score a transaction, returns fraud probability + verdict + latency

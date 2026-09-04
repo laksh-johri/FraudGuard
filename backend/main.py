@@ -52,6 +52,36 @@ _velocity_lock = threading.Lock()
 _txn_timestamps: Dict[str, deque] = defaultdict(deque)
 _amount_totals: Dict[str, Dict[str, float]] = defaultdict(lambda: {"sum": 0.0, "count": 0})
 
+# --- Running latency metrics (in-memory, process-local) --------------------
+#
+# A rolling window of latency_ms values from /predict calls served this
+# session, for the /metrics endpoint. Bounded with maxlen so a long-running
+# process can't leak memory; resets on restart same as the velocity store.
+LATENCY_SAMPLE_WINDOW = 5000
+_metrics_lock = threading.Lock()
+_latency_samples: deque = deque(maxlen=LATENCY_SAMPLE_WINDOW)
+
+
+def _record_latency(latency_ms: float) -> None:
+    with _metrics_lock:
+        _latency_samples.append(latency_ms)
+
+
+def _latency_percentiles() -> Dict[str, float | int | None]:
+    with _metrics_lock:
+        samples = list(_latency_samples)
+    if not samples:
+        return {"count": 0, "p50_ms": None, "p95_ms": None, "p99_ms": None, "min_ms": None, "max_ms": None}
+    arr = np.array(samples)
+    return {
+        "count": len(arr),
+        "p50_ms": round(float(np.percentile(arr, 50)), 3),
+        "p95_ms": round(float(np.percentile(arr, 95)), 3),
+        "p99_ms": round(float(np.percentile(arr, 99)), 3),
+        "min_ms": round(float(arr.min()), 3),
+        "max_ms": round(float(arr.max()), 3),
+    }
+
 
 def _entity_id(data: Dict[str, Any]) -> str:
     for key in ID_KEYS:
@@ -315,6 +345,16 @@ def health():
     return {"status": "ok", "model_loaded": model is not None}
 
 
+@app.get("/metrics")
+def metrics():
+    """Running p50/p95/p99/min/max latency_ms over the last
+    LATENCY_SAMPLE_WINDOW /predict calls served by this process. Resets on
+    restart -- this is a live operational view of this session, not a
+    substitute for the offline benchmark in model/artifacts/latency_stats.json.
+    """
+    return _latency_percentiles()
+
+
 @app.get("/features")
 def get_features():
     return {"feature_names": feature_names}
@@ -397,6 +437,7 @@ def predict(transaction: Transaction):
     final_risk = max(model_score, rule_score)
 
     latency_ms = (time.perf_counter() - start) * 1000
+    _record_latency(latency_ms)
 
     # Explanation is computed after the latency-critical block/allow decision
     # and isn't counted in latency_ms, so it can never slow down the hot path.
