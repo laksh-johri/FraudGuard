@@ -126,7 +126,7 @@
 <div class="panel">
   <h2>Checkout — Pay Now</h2>
   <div class="controls">
-    <label style="font-size:13px;color:var(--muted)">Amount ($)</label>
+    <label style="font-size:13px;color:var(--muted)">Amount (₹)</label>
     <input type="text" id="checkoutAmount" value="49.00">
     <button id="payNowBtn">Pay Now</button>
     <button id="simulateLegitBtn" class="secondary">Simulate legit</button>
@@ -148,7 +148,7 @@
       <thead>
         <tr>
           <th>Time</th>
-          <th>Amount</th>
+          <th>Amount (₹)</th>
           <th>Fraud Probability</th>
           <th>Verdict</th>
           <th>Latency (ms)</th>
@@ -201,7 +201,7 @@ function addRow(amount, proba, isFraud, latencyMs) {
   const time = new Date().toLocaleTimeString();
   tr.innerHTML = `
     <td>${time}</td>
-    <td>$${amount.toFixed(2)}</td>
+    <td>₹${amount.toFixed(2)}</td>
     <td>${(proba * 100).toFixed(2)}%</td>
     <td><span class="badge ${isFraud ? 'fraud' : 'ok'}">${isFraud ? 'FRAUD' : 'OK'}</span></td>
     <td>${latencyMs.toFixed(3)}</td>
@@ -289,7 +289,7 @@ function hideCheckoutBanners() {
 function showDebugPanel(riskScore, latencyMs, amount) {
   debugRiskScore.textContent = (riskScore * 100).toFixed(2) + '%';
   debugLatency.textContent = latencyMs.toFixed(3);
-  debugAmount.textContent = '$' + amount.toFixed(2);
+  debugAmount.textContent = '₹' + amount.toFixed(2);
   debugPanel.classList.add('visible');
 }
 
