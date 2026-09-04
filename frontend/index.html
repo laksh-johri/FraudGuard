@@ -377,6 +377,78 @@
     50% { opacity: 0.35; }
   }
 
+  .threshold-panel {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    margin-bottom: 12px;
+  }
+
+  .threshold-panel input[type=range] {
+    flex: 1 1 160px;
+    min-width: 120px;
+    -webkit-appearance: none;
+    appearance: none;
+    height: 4px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, var(--accent), var(--accent-2));
+    outline: none;
+    cursor: pointer;
+  }
+
+  .threshold-panel input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--text);
+    border: 3px solid var(--accent);
+    cursor: pointer;
+    transition: transform 0.1s ease;
+  }
+
+  .threshold-panel input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+
+  .threshold-panel input[type=range]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--text);
+    border: 3px solid var(--accent);
+    cursor: pointer;
+  }
+
+  .threshold-panel input[type=range]::-moz-range-track {
+    background: transparent;
+  }
+
+  .threshold-value {
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--text);
+    min-width: 36px;
+  }
+
+  .block-rate {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--amber);
+    background: var(--amber-bg);
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    padding: 4px 10px;
+    border-radius: 999px;
+    margin-left: auto;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
   .table-wrap {
     max-height: 460px;
     overflow: auto;
@@ -629,6 +701,12 @@
         <span class="live-indicator" id="liveIndicator"><span class="dot"></span>LIVE</span>
       </div>
     </div>
+    <div class="threshold-panel">
+      <span class="field-label">Risk Threshold</span>
+      <input type="range" id="riskThreshold" min="0.50" max="0.99" step="0.01" value="0.50">
+      <span class="threshold-value" id="thresholdValue">0.50</span>
+      <span class="block-rate" id="blockRate">block rate: 0.0%</span>
+    </div>
     <div class="table-wrap">
       <table>
         <thead>
@@ -733,17 +811,21 @@ function toggleExplainRow(tr) {
 
 function recordScoredTransaction(amount, result) {
   total += 1;
-  if (result.is_fraud) fraudCount += 1;
   latencySum += result.latency_ms;
-  updateStats();
-  addRow(amount, result.fraud_probability, result.is_fraud, result.latency_ms, result.top_features);
+  // Prefer the hybrid final_risk (model + velocity/rule layer) the backend
+  // actually decides on; fall back to fraud_probability against an older
+  // backend that doesn't return it yet.
+  const risk = typeof result.final_risk === 'number' ? result.final_risk : result.fraud_probability;
+  addRow(amount, result.fraud_probability, risk, result.is_fraud, result.latency_ms, result.top_features);
+  applyThreshold();
 }
 
-function addRow(amount, proba, isFraud, latencyMs, topFeatures) {
+function addRow(amount, proba, risk, isFraud, latencyMs, topFeatures) {
   emptyState.style.display = 'none';
   const tr = document.createElement('tr');
   tr.classList.add(isFraud ? 'fraud' : 'safe', 'row-enter');
   tr._topFeatures = topFeatures || [];
+  tr._risk = risk;
   const time = new Date().toLocaleTimeString();
   tr.innerHTML = `
     <td>${time}</td>
@@ -768,6 +850,51 @@ function addRow(amount, proba, isFraud, latencyMs, topFeatures) {
 
   if (isFraud && tr._topFeatures.length) toggleExplainRow(tr);
 }
+
+// --- Interactive risk-threshold slider ---
+//
+// The backend's own block/allow decision is fixed (final_risk > FRAUD_THRESHOLD
+// server-side). This slider re-evaluates every transaction already in the feed
+// against a threshold chosen client-side, purely for exploration: it recolors
+// rows, recomputes the Flagged Fraud / Fraud Rate cards, and shows a live
+// block-rate readout, so someone can drag it and directly feel the
+// precision/recall tradeoff without re-scoring anything.
+const riskThresholdInput = document.getElementById('riskThreshold');
+const thresholdValueEl = document.getElementById('thresholdValue');
+const blockRateEl = document.getElementById('blockRate');
+
+let currentThreshold = parseFloat(riskThresholdInput.value);
+
+function applyThreshold() {
+  const rows = feedEl.querySelectorAll('tr:not(.explain-row)');
+  let flagged = 0;
+
+  rows.forEach((tr) => {
+    const risk = typeof tr._risk === 'number' ? tr._risk : 0;
+    const isFraudNow = risk > currentThreshold;
+    tr.classList.toggle('fraud', isFraudNow);
+    tr.classList.toggle('safe', !isFraudNow);
+    const badge = tr.querySelector('.badge');
+    if (badge) {
+      badge.classList.toggle('fraud', isFraudNow);
+      badge.classList.toggle('ok', !isFraudNow);
+      badge.textContent = isFraudNow ? 'FRAUD' : 'OK';
+    }
+    if (isFraudNow) flagged += 1;
+  });
+
+  fraudCount = flagged;
+  updateStats();
+
+  const blockRate = rows.length ? (flagged / rows.length) * 100 : 0;
+  blockRateEl.textContent = `block rate: ${blockRate.toFixed(1)}%`;
+}
+
+riskThresholdInput.addEventListener('input', () => {
+  currentThreshold = parseFloat(riskThresholdInput.value);
+  thresholdValueEl.textContent = currentThreshold.toFixed(2);
+  applyThreshold();
+});
 
 async function scoreOnce(forceFraud) {
   const base = apiBase();
@@ -824,6 +951,7 @@ clearBtn.addEventListener('click', () => {
   emptyState.style.display = 'block';
   total = 0; fraudCount = 0; latencySum = 0;
   updateStats();
+  blockRateEl.textContent = 'block rate: 0.0%';
   setStatus('Cleared.', false);
 });
 
