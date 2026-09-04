@@ -134,8 +134,24 @@ def main():
     with open(features_path, "w") as f:
         json.dump(feature_names, f, indent=2)
 
+    # Per-feature mean/std/correlation-with-label, used by the backend as a
+    # lightweight fallback explanation (z-score * correlation sign) when the
+    # SHAP explainer is unavailable or too slow to run per-request.
+    stats_path = ARTIFACTS_DIR / "feature_stats.json"
+    feature_stats = {}
+    for name in feature_names:
+        col = X_train[name]
+        feature_stats[name] = {
+            "mean": float(col.mean()),
+            "std": float(col.std() or 1.0),
+            "corr_with_fraud": float(np.corrcoef(col, y_train)[0, 1]),
+        }
+    with open(stats_path, "w") as f:
+        json.dump(feature_stats, f, indent=2)
+
     print(f"\n[artifacts] saved {model_path}")
     print(f"[artifacts] saved {features_path}")
+    print(f"[artifacts] saved {stats_path}")
 
 
 if __name__ == "__main__":

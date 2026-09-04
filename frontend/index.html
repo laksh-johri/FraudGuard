@@ -437,6 +437,54 @@
   .badge.fraud { background: var(--red-bg); color: var(--red); }
   .badge.ok { background: var(--green-bg); color: var(--green); }
 
+  tbody tr:not(.explain-row) { cursor: pointer; }
+
+  /* ---------- Explainability chips ---------- */
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 4px 10px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  .chip.up {
+    background: var(--red-bg);
+    color: var(--red);
+    border: 1px solid rgba(248, 113, 113, 0.35);
+  }
+
+  .chip.down {
+    background: var(--green-bg);
+    color: var(--green);
+    border: 1px solid rgba(52, 211, 153, 0.35);
+  }
+
+  .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+  .explain-title {
+    font-size: 10.5px;
+    color: var(--muted);
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 8px;
+  }
+
+  .explain-empty { color: var(--muted-dim); font-size: 12px; }
+
+  .explain-block { margin-top: 14px; }
+
+  tr.explain-row { animation: rowIn 0.25s ease-out; background: #0b0d13; }
+  tr.explain-row td {
+    padding: 12px 14px;
+    white-space: normal;
+    cursor: default;
+  }
+
   .empty-state {
     padding: 34px 16px;
     text-align: center;
@@ -566,13 +614,20 @@
         <span class="kv">latency_ms: <span class="val" id="debugLatency">-</span></span>
         <span class="kv">amount: <span class="val" id="debugAmount">-</span></span>
       </div>
+      <div id="explainPanel" class="explain-block" style="display:none;">
+        <div class="explain-title">Why this score</div>
+        <div class="chip-row" id="explainChips"></div>
+      </div>
     </div>
   </section>
 
   <section class="card">
     <div class="feed-header">
       <h2>Live Transaction Feed</h2>
-      <span class="live-indicator" id="liveIndicator"><span class="dot"></span>LIVE</span>
+      <div style="display:flex; align-items:center; gap:14px;">
+        <span class="field-label" style="font-weight:500;">Click a row to see why</span>
+        <span class="live-indicator" id="liveIndicator"><span class="dot"></span>LIVE</span>
+      </div>
     </div>
     <div class="table-wrap">
       <table>
@@ -642,10 +697,44 @@ function updateStats() {
   }
 }
 
-function addRow(amount, proba, isFraud, latencyMs) {
+// --- Explainability: shared chip rendering ---
+
+function chipHTML(feature) {
+  const arrow = feature.direction === 'up' ? '↑' : '↓';
+  return `<span class="chip ${feature.direction}"><span class="arrow">${arrow}</span>${feature.label}</span>`;
+}
+
+function chipsRowHTML(topFeatures) {
+  if (!topFeatures || !topFeatures.length) {
+    return '<span class="explain-empty">No explanation available for this score.</span>';
+  }
+  return topFeatures.map(chipHTML).join('');
+}
+
+function toggleExplainRow(tr) {
+  const next = tr.nextElementSibling;
+  if (next && next.classList.contains('explain-row') && next._forRow === tr) {
+    next.remove();
+    return;
+  }
+  // Only one explanation open at a time, for a focused demo view.
+  feedEl.querySelectorAll('tr.explain-row').forEach((el) => el.remove());
+
+  const explainTr = document.createElement('tr');
+  explainTr.classList.add('explain-row');
+  explainTr._forRow = tr;
+  const td = document.createElement('td');
+  td.colSpan = 5;
+  td.innerHTML = `<div class="explain-title">Why this score</div><div class="chip-row">${chipsRowHTML(tr._topFeatures)}</div>`;
+  explainTr.appendChild(td);
+  tr.after(explainTr);
+}
+
+function addRow(amount, proba, isFraud, latencyMs, topFeatures) {
   emptyState.style.display = 'none';
   const tr = document.createElement('tr');
   tr.classList.add(isFraud ? 'fraud' : 'safe', 'row-enter');
+  tr._topFeatures = topFeatures || [];
   const time = new Date().toLocaleTimeString();
   tr.innerHTML = `
     <td>${time}</td>
@@ -654,9 +743,21 @@ function addRow(amount, proba, isFraud, latencyMs) {
     <td><span class="badge ${isFraud ? 'fraud' : 'ok'}">${isFraud ? 'FRAUD' : 'OK'}</span></td>
     <td>${latencyMs.toFixed(3)}</td>
   `;
+  tr.addEventListener('click', () => toggleExplainRow(tr));
   feedEl.prepend(tr);
   tr.addEventListener('animationend', () => tr.classList.remove('row-enter'), { once: true });
-  while (feedEl.rows.length > 200) feedEl.deleteRow(-1);
+
+  // Trim to the 200 most recent scored transactions (explanation rows don't count).
+  let dataRows = feedEl.querySelectorAll('tr:not(.explain-row)');
+  while (dataRows.length > 200) {
+    const last = dataRows[dataRows.length - 1];
+    const lastNext = last.nextElementSibling;
+    if (lastNext && lastNext.classList.contains('explain-row')) lastNext.remove();
+    last.remove();
+    dataRows = feedEl.querySelectorAll('tr:not(.explain-row)');
+  }
+
+  if (isFraud && tr._topFeatures.length) toggleExplainRow(tr);
 }
 
 async function scoreOnce() {
@@ -678,7 +779,7 @@ async function scoreOnce() {
     if (result.is_fraud) fraudCount += 1;
     latencySum += result.latency_ms;
     updateStats();
-    addRow(transaction.Amount, result.fraud_probability, result.is_fraud, result.latency_ms);
+    addRow(transaction.Amount, result.fraud_probability, result.is_fraud, result.latency_ms, result.top_features);
     setStatus(`Last scored at ${new Date().toLocaleTimeString()}.`, false);
   } catch (err) {
     setStatus(err.message, true);
@@ -727,6 +828,8 @@ const debugPanel = document.getElementById('debugPanel');
 const debugRiskScore = document.getElementById('debugRiskScore');
 const debugLatency = document.getElementById('debugLatency');
 const debugAmount = document.getElementById('debugAmount');
+const explainPanel = document.getElementById('explainPanel');
+const explainChips = document.getElementById('explainChips');
 
 const checkoutButtons = [payNowBtn, simulateLegitBtn, simulateFraudBtn];
 
@@ -738,6 +841,16 @@ function setCheckoutStatus(msg, isError) {
 function hideCheckoutBanners() {
   fraudBanner.classList.remove('fraud');
   legitBanner.classList.remove('legit');
+  explainPanel.style.display = 'none';
+}
+
+function showExplainPanel(topFeatures) {
+  if (!topFeatures || !topFeatures.length) {
+    explainPanel.style.display = 'none';
+    return;
+  }
+  explainChips.innerHTML = chipsRowHTML(topFeatures);
+  explainPanel.style.display = 'block';
 }
 
 function showDebugPanel(riskScore, latencyMs, amount) {
@@ -800,6 +913,7 @@ async function runCheckout(force) {
     const result = await predictRes.json();
 
     showDebugPanel(result.fraud_probability, result.latency_ms, amount);
+    showExplainPanel(result.top_features);
 
     if (result.is_fraud) {
       fraudBanner.classList.add('fraud');
