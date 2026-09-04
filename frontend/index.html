@@ -2,161 +2,597 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>Real-Time Fraud Detection</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FraudGuard — Real-Time Fraud Detection</title>
 <style>
   :root {
-    --bg: #0f1115;
-    --panel: #171a21;
-    --border: #2a2e38;
-    --text: #e6e8ec;
-    --muted: #8b8f9a;
-    --green: #3ddc84;
-    --red: #ff5c5c;
+    --bg: #090b10;
+    --bg-glow: radial-gradient(1200px 600px at 15% -10%, rgba(91,140,255,0.10), transparent),
+                radial-gradient(900px 500px at 100% 0%, rgba(124,92,255,0.08), transparent);
+    --panel: #12151d;
+    --panel-2: #171b26;
+    --border: #242938;
+    --border-soft: #1c2029;
+    --text: #eef1f7;
+    --muted: #8a92a6;
+    --muted-dim: #5c6478;
+    --green: #34d399;
+    --green-bg: rgba(52, 211, 153, 0.12);
+    --red: #f87171;
+    --red-bg: rgba(248, 113, 113, 0.12);
+    --amber: #fbbf24;
+    --amber-bg: rgba(251, 191, 36, 0.12);
     --accent: #5b8cff;
+    --accent-2: #8b6bff;
+    --radius: 14px;
+    --radius-sm: 9px;
   }
+
   * { box-sizing: border-box; }
+
+  html, body {
+    background: var(--bg);
+  }
+
   body {
     margin: 0;
-    font-family: -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
-    background: var(--bg);
+    min-height: 100vh;
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg-glow), var(--bg);
+    background-attachment: fixed;
     color: var(--text);
-    padding: 24px;
+    padding: 28px clamp(16px, 4vw, 40px) 60px;
+    letter-spacing: -0.01em;
   }
-  h1 { font-size: 20px; margin: 0 0 4px; }
-  .sub { color: var(--muted); font-size: 13px; margin-bottom: 20px; }
-  .panel {
+
+  .app { max-width: 1180px; margin: 0 auto; }
+
+  /* ---------- Header ---------- */
+  .topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex-wrap: wrap;
+    margin-bottom: 26px;
+  }
+
+  .brand { display: flex; align-items: center; gap: 12px; }
+
+  .brand-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: white;
+    flex-shrink: 0;
+    box-shadow: 0 6px 18px rgba(91, 140, 255, 0.28);
+  }
+
+  h1 {
+    font-size: 19px;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -0.02em;
+  }
+
+  .tagline {
+    color: var(--muted);
+    font-size: 12.5px;
+    margin: 2px 0 0;
+  }
+
+  .latency-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: var(--amber-bg);
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    color: var(--amber);
+    padding: 7px 14px 7px 10px;
+    border-radius: 999px;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+
+  .latency-badge svg { flex-shrink: 0; }
+
+  .latency-badge .pulse {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.6);
+    animation: pulse 1.8s ease-out infinite;
+  }
+
+  @keyframes pulse {
+    0%   { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0.55); }
+    70%  { box-shadow: 0 0 0 8px rgba(251, 191, 36, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(251, 191, 36, 0); }
+  }
+
+  /* ---------- Metric cards ---------- */
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 18px;
+  }
+
+  .metric-card {
     background: var(--panel);
     border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 16px;
-    margin-bottom: 16px;
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.2s ease, transform 0.2s ease;
   }
+
+  .metric-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: 0.5;
+    background: linear-gradient(160deg, rgba(255,255,255,0.03), transparent 55%);
+    pointer-events: none;
+  }
+
+  .metric-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+
+  .metric-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
+  .metric-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+  }
+
+  .metric-icon.blue   { background: rgba(91, 140, 255, 0.14); color: var(--accent); }
+  .metric-icon.red    { background: var(--red-bg); color: var(--red); }
+  .metric-icon.green  { background: var(--green-bg); color: var(--green); }
+  .metric-icon.amber  { background: var(--amber-bg); color: var(--amber); }
+
+  .metric-value {
+    font-size: 28px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .metric-value.red { color: var(--red); }
+  .metric-value small { font-size: 14px; color: var(--muted); font-weight: 600; margin-left: 2px; }
+
+  /* ---------- Panels / cards ---------- */
+  .row-2 {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 14px;
+    align-items: start;
+  }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 18px 20px;
+  }
+
+  .card + .card { margin-top: 14px; }
+
+  .card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+
+  h2 {
+    font-size: 14px;
+    font-weight: 700;
+    margin: 0;
+    letter-spacing: -0.01em;
+  }
+
+  .field-label {
+    font-size: 12px;
+    color: var(--muted);
+    font-weight: 600;
+  }
+
   .controls { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
-  button {
-    background: var(--accent);
-    color: white;
-    border: none;
-    border-radius: 6px;
-    padding: 8px 14px;
-    font-size: 13px;
-    cursor: pointer;
-  }
-  button.secondary { background: #2a2e38; }
-  button:disabled { opacity: 0.5; cursor: not-allowed; }
+
   input[type=text] {
-    background: #0f1115;
+    background: #0b0d13;
     border: 1px solid var(--border);
     color: var(--text);
-    border-radius: 6px;
-    padding: 8px;
+    border-radius: var(--radius-sm);
+    padding: 9px 11px;
     font-size: 13px;
-    width: 220px;
+    width: 210px;
+    outline: none;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
   }
-  .stats { display: flex; gap: 24px; margin-top: 14px; }
-  .stat { font-size: 13px; color: var(--muted); }
-  .stat b { display: block; font-size: 20px; color: var(--text); }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
-  th { color: var(--muted); font-weight: 600; position: sticky; top: 0; background: var(--panel); }
-  tr.fraud { background: rgba(255, 92, 92, 0.08); }
-  .badge { padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-  .badge.fraud { background: rgba(255, 92, 92, 0.15); color: var(--red); }
-  .badge.ok { background: rgba(61, 220, 132, 0.15); color: var(--green); }
-  .table-wrap { max-height: 480px; overflow: auto; }
-  .status { font-size: 12px; margin-top: 8px; color: var(--muted); }
-  .status.error { color: var(--red); }
-  h2 { font-size: 15px; margin: 0 0 12px; }
-  .debug-panel {
-    margin-top: 14px;
-    background: #0f1115;
+
+  input[type=text]:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(91, 140, 255, 0.15);
+  }
+
+  button {
+    background: var(--panel-2);
+    color: var(--text);
     border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 10px 12px;
-    font-size: 12px;
-    font-family: "SFMono-Regular", Consolas, Menlo, monospace;
-    color: var(--muted);
-    display: none;
+    border-radius: var(--radius-sm);
+    padding: 9px 15px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: transform 0.08s ease, filter 0.15s ease, border-color 0.15s ease;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
   }
-  .debug-panel.visible { display: block; }
-  .debug-panel span { color: var(--text); }
+
+  button:hover { filter: brightness(1.12); }
+  button:active { transform: translateY(1px); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; filter: none; }
+
+  button.primary {
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border-color: transparent;
+    color: white;
+    box-shadow: 0 6px 16px rgba(91, 140, 255, 0.25);
+  }
+
+  button.success {
+    background: var(--green-bg);
+    border-color: rgba(52, 211, 153, 0.35);
+    color: var(--green);
+  }
+
+  button.danger {
+    background: var(--red-bg);
+    border-color: rgba(248, 113, 113, 0.35);
+    color: var(--red);
+  }
+
+  button.streaming {
+    background: var(--red-bg);
+    border-color: rgba(248, 113, 113, 0.4);
+    color: var(--red);
+  }
+
+  .status {
+    font-size: 12px;
+    margin-top: 10px;
+    color: var(--muted);
+  }
+
+  .status.error { color: var(--red); }
+
+  /* ---------- Checkout ---------- */
   .banner {
     display: none;
     margin-top: 14px;
     padding: 12px 14px;
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     font-size: 13px;
-    font-weight: 600;
+    font-weight: 700;
+    align-items: center;
+    gap: 8px;
   }
+
   .banner.fraud {
-    display: block;
-    background: rgba(255, 92, 92, 0.15);
-    border: 1px solid var(--red);
+    display: flex;
+    background: var(--red-bg);
+    border: 1px solid rgba(248, 113, 113, 0.4);
     color: var(--red);
+    animation: shake 0.4s ease;
   }
+
   .banner.legit {
-    display: block;
-    background: rgba(61, 220, 132, 0.15);
-    border: 1px solid var(--green);
+    display: flex;
+    background: var(--green-bg);
+    border: 1px solid rgba(52, 211, 153, 0.4);
     color: var(--green);
+  }
+
+  @keyframes shake {
+    10%, 90% { transform: translateX(-1px); }
+    20%, 80% { transform: translateX(2px); }
+    30%, 50%, 70% { transform: translateX(-4px); }
+    40%, 60% { transform: translateX(4px); }
+  }
+
+  .debug-panel {
+    margin-top: 12px;
+    background: #0b0d13;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 10px 13px;
+    font-size: 12px;
+    font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+    color: var(--muted);
+    display: none;
+    gap: 4px 18px;
+    flex-wrap: wrap;
+  }
+
+  .debug-panel.visible { display: flex; }
+  .debug-panel .kv { display: flex; gap: 6px; }
+  .debug-panel span.val { color: var(--text); font-weight: 600; }
+
+  /* ---------- Feed table ---------- */
+  .feed-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+
+  .live-indicator {
+    display: none;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--red);
+    letter-spacing: 0.04em;
+  }
+
+  .live-indicator.active { display: flex; }
+
+  .live-indicator .dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--red);
+    animation: pulse-red 1.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse-red {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.35; }
+  }
+
+  .table-wrap {
+    max-height: 460px;
+    overflow: auto;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-soft);
+  }
+
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; min-width: 560px; }
+
+  th, td {
+    text-align: left;
+    padding: 9px 12px;
+    border-bottom: 1px solid var(--border-soft);
+    white-space: nowrap;
+  }
+
+  td:first-child, th:first-child { border-left: 3px solid transparent; }
+
+  th {
+    color: var(--muted);
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    position: sticky;
+    top: 0;
+    background: var(--panel-2);
+    z-index: 1;
+  }
+
+  tbody tr { transition: background-color 0.3s ease; }
+  tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
+
+  tr.safe td:first-child { border-left-color: var(--green); }
+  tr.fraud td:first-child { border-left-color: var(--red); }
+  tr.fraud { background: rgba(248, 113, 113, 0.05); }
+  tr.safe { background: rgba(52, 211, 153, 0.03); }
+
+  tr.row-enter {
+    animation: rowIn 0.45s ease-out;
+  }
+
+  @keyframes rowIn {
+    0%   { opacity: 0; transform: translateY(-8px); }
+    60%  { opacity: 1; }
+    100% { opacity: 1; transform: translateY(0); }
+  }
+
+  .badge {
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    display: inline-block;
+  }
+
+  .badge.fraud { background: var(--red-bg); color: var(--red); }
+  .badge.ok { background: var(--green-bg); color: var(--green); }
+
+  .empty-state {
+    padding: 34px 16px;
+    text-align: center;
+    color: var(--muted-dim);
+    font-size: 13px;
+  }
+
+  footer.foot {
+    text-align: center;
+    color: var(--muted-dim);
+    font-size: 11.5px;
+    margin-top: 28px;
+  }
+
+  /* ---------- Responsive ---------- */
+  @media (max-width: 900px) {
+    .metrics { grid-template-columns: repeat(2, 1fr); }
+    .row-2 { grid-template-columns: 1fr; }
+  }
+
+  @media (max-width: 520px) {
+    .metrics { grid-template-columns: 1fr 1fr; }
+    input[type=text] { width: 100%; }
+    .controls { width: 100%; }
+    .topbar { align-items: flex-start; }
   }
 </style>
 </head>
 <body>
 
-<h1>Real-Time Fraud Detection</h1>
-<div class="sub">Streams simulated transactions to the FastAPI backend and scores each one with the trained XGBoost model.</div>
+<div class="app">
 
-<div class="panel">
-  <div class="controls">
-    <label style="font-size:13px;color:var(--muted)">API URL</label>
-    <input type="text" id="apiUrl" value="http://127.0.0.1:8000">
-    <button id="scoreOnceBtn">Score One Transaction</button>
-    <button id="streamBtn" class="secondary">Start Live Stream</button>
-    <button id="clearBtn" class="secondary">Clear</button>
-  </div>
-  <div class="stats">
-    <div class="stat"><b id="statTotal">0</b>Total Scored</div>
-    <div class="stat"><b id="statFraud">0</b>Flagged Fraud</div>
-    <div class="stat"><b id="statRate">0%</b>Fraud Rate</div>
-    <div class="stat"><b id="statLatency">-</b>Avg Latency (ms)</div>
-  </div>
-  <div id="status" class="status">Idle. Set the API URL and click "Score One Transaction" or start the live stream.</div>
-</div>
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2 4 5v6c0 5.2 3.4 9.4 8 11 4.6-1.6 8-5.8 8-11V5l-8-3z"/>
+          <path d="M9 12l2 2 4-4"/>
+        </svg>
+      </div>
+      <div>
+        <h1>FraudGuard</h1>
+        <p class="tagline">Real-time transaction risk scoring · XGBoost</p>
+      </div>
+    </div>
 
-<div class="panel">
-  <h2>Checkout — Pay Now</h2>
-  <div class="controls">
-    <label style="font-size:13px;color:var(--muted)">Amount (₹)</label>
-    <input type="text" id="checkoutAmount" value="49.00">
-    <button id="payNowBtn">Pay Now</button>
-    <button id="simulateLegitBtn" class="secondary">Simulate legit</button>
-    <button id="simulateFraudBtn" class="secondary">Simulate fraud</button>
-  </div>
-  <div id="checkoutStatus" class="status">Click "Pay Now" to score and checkout, or use a demo button to force an outcome.</div>
-  <div id="fraudBanner" class="banner">Transaction declined due to security risk</div>
-  <div id="legitBanner" class="banner">Risk check passed — opening checkout...</div>
-  <div id="debugPanel" class="debug-panel">
-    risk_score: <span id="debugRiskScore">-</span> &nbsp;|&nbsp;
-    latency_ms: <span id="debugLatency">-</span> &nbsp;|&nbsp;
-    amount: <span id="debugAmount">-</span>
-  </div>
-</div>
+    <div class="latency-badge">
+      <span class="pulse"></span>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+      <span id="latencyBadgeText">~2ms inference</span>
+    </div>
+  </header>
 
-<div class="panel">
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr>
-          <th>Time</th>
-          <th>Amount (₹)</th>
-          <th>Fraud Probability</th>
-          <th>Verdict</th>
-          <th>Latency (ms)</th>
-        </tr>
-      </thead>
-      <tbody id="feed"></tbody>
-    </table>
-  </div>
+  <section class="metrics">
+    <div class="metric-card">
+      <div class="metric-top">
+        <span class="metric-label">Total Scored</span>
+        <span class="metric-icon blue">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5.2 3.4 9.4 8 11 4.6-1.6 8-5.8 8-11V5l-8-3z"/></svg>
+        </span>
+      </div>
+      <div class="metric-value" id="statTotal">0</div>
+    </div>
+
+    <div class="metric-card">
+      <div class="metric-top">
+        <span class="metric-label">Flagged Fraud</span>
+        <span class="metric-icon red">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 20h20L12 3z"/><line x1="12" y1="9" x2="12" y2="14"/><line x1="12" y1="17" x2="12" y2="17.01"/></svg>
+        </span>
+      </div>
+      <div class="metric-value red" id="statFraud">0</div>
+    </div>
+
+    <div class="metric-card">
+      <div class="metric-top">
+        <span class="metric-label">Fraud Rate</span>
+        <span class="metric-icon amber">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="19" y1="5" x2="5" y2="19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg>
+        </span>
+      </div>
+      <div class="metric-value" id="statRate">0%</div>
+    </div>
+
+    <div class="metric-card">
+      <div class="metric-top">
+        <span class="metric-label">Avg Latency</span>
+        <span class="metric-icon green">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+        </span>
+      </div>
+      <div class="metric-value" id="statLatency">–<small>ms</small></div>
+    </div>
+  </section>
+
+  <section class="row-2">
+    <div class="card">
+      <div class="card-header"><h2>Live Scoring</h2></div>
+      <div class="controls" style="margin-bottom:2px;">
+        <span class="field-label">API URL</span>
+        <input type="text" id="apiUrl" value="http://127.0.0.1:8000">
+      </div>
+      <div class="controls" style="margin-top:12px;">
+        <button id="scoreOnceBtn" class="primary">Score One Transaction</button>
+        <button id="streamBtn">▶ Start Live Stream</button>
+        <button id="clearBtn">Clear</button>
+      </div>
+      <div id="status" class="status">Idle. Set the API URL and click "Score One Transaction" or start the live stream.</div>
+    </div>
+
+    <div class="card">
+      <div class="card-header"><h2>Checkout — Pay Now</h2></div>
+      <div class="controls" style="margin-bottom:2px;">
+        <span class="field-label">Amount (₹)</span>
+        <input type="text" id="checkoutAmount" value="49.00">
+      </div>
+      <div class="controls" style="margin-top:12px;">
+        <button id="payNowBtn" class="primary">Pay Now</button>
+        <button id="simulateLegitBtn" class="success">Simulate legit</button>
+        <button id="simulateFraudBtn" class="danger">Simulate fraud</button>
+      </div>
+      <div id="checkoutStatus" class="status">Click "Pay Now" to score and checkout, or use a demo button to force an outcome.</div>
+      <div id="fraudBanner" class="banner">🛑 Transaction declined due to security risk</div>
+      <div id="legitBanner" class="banner">✅ Risk check passed — opening checkout...</div>
+      <div id="debugPanel" class="debug-panel">
+        <span class="kv">risk_score: <span class="val" id="debugRiskScore">-</span></span>
+        <span class="kv">latency_ms: <span class="val" id="debugLatency">-</span></span>
+        <span class="kv">amount: <span class="val" id="debugAmount">-</span></span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="feed-header">
+      <h2>Live Transaction Feed</h2>
+      <span class="live-indicator" id="liveIndicator"><span class="dot"></span>LIVE</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Amount (₹)</th>
+            <th>Fraud Probability</th>
+            <th>Verdict</th>
+            <th>Latency (ms)</th>
+          </tr>
+        </thead>
+        <tbody id="feed"></tbody>
+      </table>
+    </div>
+    <div class="empty-state" id="emptyState">No transactions scored yet — click "Score One Transaction" or start the live stream.</div>
+  </section>
+
+  <footer class="foot">FraudGuard demo · FastAPI + XGBoost · scoring happens before Razorpay checkout ever opens</footer>
+
 </div>
 
 <script src="https://checkout.razorpay.com/v1/checkout.js"></script>
@@ -169,6 +605,9 @@ const streamBtn = document.getElementById('streamBtn');
 const clearBtn = document.getElementById('clearBtn');
 const statusEl = document.getElementById('status');
 const feedEl = document.getElementById('feed');
+const emptyState = document.getElementById('emptyState');
+const liveIndicator = document.getElementById('liveIndicator');
+const latencyBadgeText = document.getElementById('latencyBadgeText');
 
 const statTotal = document.getElementById('statTotal');
 const statFraud = document.getElementById('statFraud');
@@ -192,12 +631,21 @@ function updateStats() {
   statTotal.textContent = total;
   statFraud.textContent = fraudCount;
   statRate.textContent = total ? ((fraudCount / total) * 100).toFixed(1) + '%' : '0%';
-  statLatency.textContent = total ? (latencySum / total).toFixed(2) : '-';
+
+  if (total) {
+    const avg = latencySum / total;
+    statLatency.innerHTML = avg.toFixed(2) + '<small>ms</small>';
+    latencyBadgeText.textContent = `~${avg.toFixed(1)}ms inference`;
+  } else {
+    statLatency.innerHTML = '–<small>ms</small>';
+    latencyBadgeText.textContent = '~2ms inference';
+  }
 }
 
 function addRow(amount, proba, isFraud, latencyMs) {
+  emptyState.style.display = 'none';
   const tr = document.createElement('tr');
-  if (isFraud) tr.classList.add('fraud');
+  tr.classList.add(isFraud ? 'fraud' : 'safe', 'row-enter');
   const time = new Date().toLocaleTimeString();
   tr.innerHTML = `
     <td>${time}</td>
@@ -207,6 +655,7 @@ function addRow(amount, proba, isFraud, latencyMs) {
     <td>${latencyMs.toFixed(3)}</td>
   `;
   feedEl.prepend(tr);
+  tr.addEventListener('animationend', () => tr.classList.remove('row-enter'), { once: true });
   while (feedEl.rows.length > 200) feedEl.deleteRow(-1);
 }
 
@@ -239,14 +688,18 @@ async function scoreOnce() {
 
 function startStream() {
   streaming = true;
-  streamBtn.textContent = 'Stop Live Stream';
+  streamBtn.textContent = '■ Stop Live Stream';
+  streamBtn.classList.add('streaming');
+  liveIndicator.classList.add('active');
   streamTimer = setInterval(scoreOnce, 1000);
   scoreOnce();
 }
 
 function stopStream() {
   streaming = false;
-  streamBtn.textContent = 'Start Live Stream';
+  streamBtn.textContent = '▶ Start Live Stream';
+  streamBtn.classList.remove('streaming');
+  liveIndicator.classList.remove('active');
   if (streamTimer) clearInterval(streamTimer);
   streamTimer = null;
 }
@@ -255,6 +708,7 @@ scoreOnceBtn.addEventListener('click', scoreOnce);
 streamBtn.addEventListener('click', () => (streaming ? stopStream() : startStream()));
 clearBtn.addEventListener('click', () => {
   feedEl.innerHTML = '';
+  emptyState.style.display = 'block';
   total = 0; fraudCount = 0; latencySum = 0;
   updateStats();
   setStatus('Cleared.', false);
