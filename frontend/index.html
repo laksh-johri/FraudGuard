@@ -672,6 +672,7 @@ const statLatency = document.getElementById('statLatency');
 let total = 0, fraudCount = 0, latencySum = 0;
 let streaming = false;
 let streamTimer = null;
+let tickCount = 0;
 
 function apiBase() {
   return apiUrlInput.value.trim().replace(/\/$/, '');
@@ -730,6 +731,14 @@ function toggleExplainRow(tr) {
   tr.after(explainTr);
 }
 
+function recordScoredTransaction(amount, result) {
+  total += 1;
+  if (result.is_fraud) fraudCount += 1;
+  latencySum += result.latency_ms;
+  updateStats();
+  addRow(amount, result.fraud_probability, result.is_fraud, result.latency_ms, result.top_features);
+}
+
 function addRow(amount, proba, isFraud, latencyMs, topFeatures) {
   emptyState.style.display = 'none';
   const tr = document.createElement('tr');
@@ -760,10 +769,11 @@ function addRow(amount, proba, isFraud, latencyMs, topFeatures) {
   if (isFraud && tr._topFeatures.length) toggleExplainRow(tr);
 }
 
-async function scoreOnce() {
+async function scoreOnce(forceFraud) {
   const base = apiBase();
   try {
-    const sampleRes = await fetch(`${base}/sample`);
+    const sampleUrl = forceFraud ? `${base}/sample?force=fraud` : `${base}/sample`;
+    const sampleRes = await fetch(sampleUrl);
     if (!sampleRes.ok) throw new Error(`GET /sample failed: ${sampleRes.status}`);
     const transaction = await sampleRes.json();
 
@@ -775,11 +785,7 @@ async function scoreOnce() {
     if (!predictRes.ok) throw new Error(`POST /predict failed: ${predictRes.status}`);
     const result = await predictRes.json();
 
-    total += 1;
-    if (result.is_fraud) fraudCount += 1;
-    latencySum += result.latency_ms;
-    updateStats();
-    addRow(transaction.Amount, result.fraud_probability, result.is_fraud, result.latency_ms, result.top_features);
+    recordScoredTransaction(transaction.Amount, result);
     setStatus(`Last scored at ${new Date().toLocaleTimeString()}.`, false);
   } catch (err) {
     setStatus(err.message, true);
@@ -787,13 +793,18 @@ async function scoreOnce() {
   }
 }
 
+function streamTick() {
+  tickCount += 1;
+  scoreOnce(tickCount % 7 === 0);
+}
+
 function startStream() {
   streaming = true;
   streamBtn.textContent = '■ Stop Live Stream';
   streamBtn.classList.add('streaming');
   liveIndicator.classList.add('active');
-  streamTimer = setInterval(scoreOnce, 1000);
-  scoreOnce();
+  streamTimer = setInterval(streamTick, 1000);
+  streamTick();
 }
 
 function stopStream() {
@@ -803,9 +814,10 @@ function stopStream() {
   liveIndicator.classList.remove('active');
   if (streamTimer) clearInterval(streamTimer);
   streamTimer = null;
+  tickCount = 0;
 }
 
-scoreOnceBtn.addEventListener('click', scoreOnce);
+scoreOnceBtn.addEventListener('click', () => streamTick());
 streamBtn.addEventListener('click', () => (streaming ? stopStream() : startStream()));
 clearBtn.addEventListener('click', () => {
   feedEl.innerHTML = '';
@@ -914,6 +926,7 @@ async function runCheckout(force) {
 
     showDebugPanel(result.fraud_probability, result.latency_ms, amount);
     showExplainPanel(result.top_features);
+    recordScoredTransaction(amount, result);
 
     if (result.is_fraud) {
       fraudBanner.classList.add('fraud');
