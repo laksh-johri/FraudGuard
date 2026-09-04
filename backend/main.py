@@ -16,7 +16,7 @@ from typing import Dict
 import joblib
 import numpy as np
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, RootModel
 
@@ -26,6 +26,22 @@ MODEL_PATH = ARTIFACTS_DIR / "fraud_model.pkl"
 FEATURES_PATH = ARTIFACTS_DIR / "feature_names.json"
 
 FRAUD_THRESHOLD = 0.5
+
+# Fixed feature vectors picked from the training distribution where the model is
+# extremely confident (proba > 0.999 fraud / < 1e-5 legit), used by /sample?force=
+# so demo buttons on stage trigger reliably instead of depending on random luck.
+FRAUD_ARCHETYPE = {
+    "f0": -5.645, "f1": -3.0287, "f2": 0.7904, "f3": -0.7754, "f4": 2.6919,
+    "f5": -2.1907, "f6": 1.3861, "f7": 0.4205, "f8": -0.4367, "f9": -0.33,
+    "f10": 1.665, "f11": -0.0928, "f12": -2.0329, "f13": -0.6147, "f14": 5.0187,
+    "Amount": 790.69,
+}
+LEGIT_ARCHETYPE = {
+    "f0": 0.1081, "f1": 2.8937, "f2": 0.7839, "f3": -2.8963, "f4": -2.3084,
+    "f5": -3.5742, "f6": 2.7522, "f7": -1.944, "f8": -2.1419, "f9": 2.1316,
+    "f10": 1.8236, "f11": -1.8461, "f12": 4.4286, "f13": 0.759, "f14": 3.6087,
+    "Amount": 30.25,
+}
 
 app = FastAPI(title="Fraud Detection API")
 
@@ -72,13 +88,23 @@ def get_features():
 
 
 @app.get("/sample")
-def sample_transaction():
-    """Generate a random transaction for demo/streaming purposes.
+def sample_transaction(force: str | None = Query(default=None, pattern="^(fraud|legit)$")):
+    """Generate a transaction for demo/streaming purposes.
 
-    Loosely mirrors the synthetic training distribution (mostly normal
-    transactions, occasionally shifted to look fraud-like) so scored
-    results vary in an interesting way.
+    Without `force`, loosely mirrors the synthetic training distribution
+    (mostly normal transactions, occasionally shifted to look fraud-like)
+    so scored results vary in an interesting way.
+
+    With `force=fraud` or `force=legit`, jitters one of the fixed
+    high-confidence archetypes above so the result reliably scores on the
+    intended side of the threshold — for demo buttons that must not depend
+    on random luck.
     """
+    if force == "fraud":
+        return _jitter_archetype(FRAUD_ARCHETYPE)
+    if force == "legit":
+        return _jitter_archetype(LEGIT_ARCHETYPE)
+
     is_fraud_like = np.random.random() < 0.05
     features = {}
     for name in feature_names:
@@ -94,6 +120,17 @@ def sample_transaction():
         amount += np.random.gamma(3.0, 80.0)
     features["Amount"] = round(float(amount), 2)
 
+    return features
+
+
+def _jitter_archetype(base: Dict[str, float]) -> Dict[str, float]:
+    features = {}
+    for name, value in base.items():
+        if name == "Amount":
+            jittered = value + np.random.normal(0, value * 0.1)
+            features[name] = round(float(max(1.0, jittered)), 2)
+        else:
+            features[name] = round(float(value + np.random.normal(0, 0.15)), 4)
     return features
 
 

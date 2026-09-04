@@ -65,6 +65,40 @@
   .table-wrap { max-height: 480px; overflow: auto; }
   .status { font-size: 12px; margin-top: 8px; color: var(--muted); }
   .status.error { color: var(--red); }
+  h2 { font-size: 15px; margin: 0 0 12px; }
+  .debug-panel {
+    margin-top: 14px;
+    background: #0f1115;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    font-size: 12px;
+    font-family: "SFMono-Regular", Consolas, Menlo, monospace;
+    color: var(--muted);
+    display: none;
+  }
+  .debug-panel.visible { display: block; }
+  .debug-panel span { color: var(--text); }
+  .banner {
+    display: none;
+    margin-top: 14px;
+    padding: 12px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .banner.fraud {
+    display: block;
+    background: rgba(255, 92, 92, 0.15);
+    border: 1px solid var(--red);
+    color: var(--red);
+  }
+  .banner.legit {
+    display: block;
+    background: rgba(61, 220, 132, 0.15);
+    border: 1px solid var(--green);
+    color: var(--green);
+  }
 </style>
 </head>
 <body>
@@ -90,6 +124,25 @@
 </div>
 
 <div class="panel">
+  <h2>Checkout — Pay Now</h2>
+  <div class="controls">
+    <label style="font-size:13px;color:var(--muted)">Amount ($)</label>
+    <input type="text" id="checkoutAmount" value="49.00">
+    <button id="payNowBtn">Pay Now</button>
+    <button id="simulateLegitBtn" class="secondary">Simulate legit</button>
+    <button id="simulateFraudBtn" class="secondary">Simulate fraud</button>
+  </div>
+  <div id="checkoutStatus" class="status">Click "Pay Now" to score and checkout, or use a demo button to force an outcome.</div>
+  <div id="fraudBanner" class="banner">Transaction declined due to security risk</div>
+  <div id="legitBanner" class="banner">Risk check passed — opening checkout...</div>
+  <div id="debugPanel" class="debug-panel">
+    risk_score: <span id="debugRiskScore">-</span> &nbsp;|&nbsp;
+    latency_ms: <span id="debugLatency">-</span> &nbsp;|&nbsp;
+    amount: <span id="debugAmount">-</span>
+  </div>
+</div>
+
+<div class="panel">
   <div class="table-wrap">
     <table>
       <thead>
@@ -106,7 +159,10 @@
   </div>
 </div>
 
+<script src="https://checkout.razorpay.com/v1/checkout.js"></script>
 <script>
+const RAZORPAY_KEY = "rzp_test_TXw0g1I24GvQ3X";
+
 const apiUrlInput = document.getElementById('apiUrl');
 const scoreOnceBtn = document.getElementById('scoreOnceBtn');
 const streamBtn = document.getElementById('streamBtn');
@@ -203,6 +259,112 @@ clearBtn.addEventListener('click', () => {
   updateStats();
   setStatus('Cleared.', false);
 });
+
+// --- Checkout: Pay Now / Simulate legit / Simulate fraud ---
+
+const checkoutAmountInput = document.getElementById('checkoutAmount');
+const payNowBtn = document.getElementById('payNowBtn');
+const simulateLegitBtn = document.getElementById('simulateLegitBtn');
+const simulateFraudBtn = document.getElementById('simulateFraudBtn');
+const checkoutStatusEl = document.getElementById('checkoutStatus');
+const fraudBanner = document.getElementById('fraudBanner');
+const legitBanner = document.getElementById('legitBanner');
+const debugPanel = document.getElementById('debugPanel');
+const debugRiskScore = document.getElementById('debugRiskScore');
+const debugLatency = document.getElementById('debugLatency');
+const debugAmount = document.getElementById('debugAmount');
+
+const checkoutButtons = [payNowBtn, simulateLegitBtn, simulateFraudBtn];
+
+function setCheckoutStatus(msg, isError) {
+  checkoutStatusEl.textContent = msg;
+  checkoutStatusEl.className = 'status' + (isError ? ' error' : '');
+}
+
+function hideCheckoutBanners() {
+  fraudBanner.classList.remove('fraud');
+  legitBanner.classList.remove('legit');
+}
+
+function showDebugPanel(riskScore, latencyMs, amount) {
+  debugRiskScore.textContent = (riskScore * 100).toFixed(2) + '%';
+  debugLatency.textContent = latencyMs.toFixed(3);
+  debugAmount.textContent = '$' + amount.toFixed(2);
+  debugPanel.classList.add('visible');
+}
+
+function openRazorpayCheckout(amount) {
+  if (typeof Razorpay === 'undefined') {
+    setCheckoutStatus('Razorpay checkout.js failed to load (offline?).', true);
+    return;
+  }
+  const options = {
+    key: RAZORPAY_KEY,
+    amount: Math.round(amount * 100), // paise
+    currency: 'INR',
+    name: 'Fraud Detection Demo Store',
+    description: 'Test-mode checkout',
+    handler: function (response) {
+      setCheckoutStatus(`Payment successful (test): ${response.razorpay_payment_id}`, false);
+    },
+    modal: {
+      ondismiss: function () {
+        setCheckoutStatus('Checkout closed.', false);
+      },
+    },
+    theme: { color: '#5b8cff' },
+  };
+  const rzp = new Razorpay(options);
+  rzp.on('payment.failed', function (response) {
+    setCheckoutStatus(`Payment failed (test): ${response.error.description}`, true);
+  });
+  rzp.open();
+}
+
+async function runCheckout(force) {
+  const base = apiBase();
+  checkoutButtons.forEach((b) => (b.disabled = true));
+  hideCheckoutBanners();
+  setCheckoutStatus('Scoring transaction...', false);
+
+  try {
+    const sampleUrl = force ? `${base}/sample?force=${force}` : `${base}/sample`;
+    const sampleRes = await fetch(sampleUrl);
+    if (!sampleRes.ok) throw new Error(`GET /sample failed: ${sampleRes.status}`);
+    const transaction = await sampleRes.json();
+
+    const manualAmount = parseFloat(checkoutAmountInput.value);
+    const amount = force ? transaction.Amount : (isNaN(manualAmount) ? transaction.Amount : manualAmount);
+    if (!force) transaction.Amount = amount;
+
+    const predictRes = await fetch(`${base}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(transaction),
+    });
+    if (!predictRes.ok) throw new Error(`POST /predict failed: ${predictRes.status}`);
+    const result = await predictRes.json();
+
+    showDebugPanel(result.fraud_probability, result.latency_ms, amount);
+
+    if (result.is_fraud) {
+      fraudBanner.classList.add('fraud');
+      setCheckoutStatus('Blocked before checkout.', false);
+    } else {
+      legitBanner.classList.add('legit');
+      setCheckoutStatus('Risk check passed. Opening Razorpay...', false);
+      openRazorpayCheckout(amount);
+    }
+  } catch (err) {
+    setCheckoutStatus(err.message, true);
+  } finally {
+    checkoutButtons.forEach((b) => (b.disabled = false));
+  }
+}
+
+payNowBtn.addEventListener('click', () => runCheckout(null));
+simulateLegitBtn.addEventListener('click', () => runCheckout('legit'));
+simulateFraudBtn.addEventListener('click', () => runCheckout('fraud'));
 </script>
 
 </body>
