@@ -6,3 +6,5 @@ xgboost
 joblib
 pydantic
 shap
+google-generativeai
+python-dotenv

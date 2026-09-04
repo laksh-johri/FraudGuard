@@ -615,6 +615,77 @@
 
   #histogramSvg text { font-family: var(--font-mono); }
 
+  /* ---------- AI Risk Analyst ---------- */
+  .ai-badge {
+    display: none;
+    align-items: center;
+    font-size: 10.5px;
+    font-weight: 600;
+    padding: 3px 9px;
+    border-radius: 999px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  .ai-badge.visible { display: inline-flex; }
+  .ai-badge.gemini { background: var(--accent-bg); color: var(--accent); }
+  .ai-badge.template { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+
+  .ai-loading {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    color: var(--muted);
+    font-size: 13px;
+    padding: 6px 0 2px;
+  }
+
+  .ai-loading.visible { display: flex; }
+
+  .ai-spinner {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    flex-shrink: 0;
+    animation: spin 700ms linear infinite;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .ai-analyst-content { display: none; }
+  .ai-analyst-content.visible { display: block; }
+
+  .ai-narrative {
+    font-size: 13.5px;
+    line-height: 1.65;
+    color: var(--text);
+    margin: 0 0 14px;
+  }
+
+  .ai-action {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 12.5px;
+    color: var(--text);
+    background: var(--accent-bg);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: var(--radius-sm);
+    padding: 10px 12px;
+  }
+
+  .ai-action::before {
+    content: "Recommended action";
+    flex-shrink: 0;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent);
+  }
+
   footer.foot {
     text-align: center;
     color: var(--muted-dim);
@@ -764,6 +835,22 @@
   </section>
 
   <section class="card">
+    <div class="card-header">
+      <h2>AI Risk Analyst</h2>
+      <span class="ai-badge" id="aiSourceBadge"></span>
+    </div>
+    <div class="empty-state" id="aiAnalystEmpty">Click a transaction row below, or trigger a block via checkout, for an AI-generated risk narrative.</div>
+    <div class="ai-loading" id="aiAnalystLoading">
+      <span class="ai-spinner"></span>
+      <span>Analyzing transaction...</span>
+    </div>
+    <div class="ai-analyst-content" id="aiAnalystContent">
+      <p class="ai-narrative" id="aiNarrativeText"></p>
+      <div class="ai-action" id="aiActionText"></div>
+    </div>
+  </section>
+
+  <section class="card">
     <div class="feed-header">
       <h2>Live Transaction Feed</h2>
       <div style="display:flex; align-items:center; gap:14px;">
@@ -860,6 +947,59 @@ function chipsRowHTML(topFeatures) {
   return topFeatures.map(chipHTML).join('');
 }
 
+// --- AI Risk Analyst (POST /explain) ---
+//
+// Strictly a post-decision, on-demand call: it only ever fires after /predict
+// (or /predict via the checkout flow) has already returned and the block/
+// allow decision is final. Never awaited by anything on the scoring path.
+const aiAnalystEmpty = document.getElementById('aiAnalystEmpty');
+const aiAnalystLoading = document.getElementById('aiAnalystLoading');
+const aiAnalystContent = document.getElementById('aiAnalystContent');
+const aiNarrativeText = document.getElementById('aiNarrativeText');
+const aiActionText = document.getElementById('aiActionText');
+const aiSourceBadge = document.getElementById('aiSourceBadge');
+
+async function requestAiExplanation(amount, result) {
+  aiAnalystEmpty.style.display = 'none';
+  aiAnalystContent.classList.remove('visible');
+  aiSourceBadge.classList.remove('visible', 'gemini', 'template');
+  aiAnalystLoading.classList.add('visible');
+
+  const base = apiBase();
+  const payload = {
+    final_risk: typeof result.final_risk === 'number' ? result.final_risk : result.fraud_probability,
+    model_score: result.model_score,
+    rule_score: result.rule_score,
+    txn_count_last_60s: result.txn_count_last_60s,
+    amount_vs_avg: result.amount_vs_avg,
+    top_features: result.top_features || [],
+    is_fraud: result.is_fraud,
+    amount: amount,
+  };
+
+  try {
+    const res = await fetch(`${base}/explain`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!res.ok) throw new Error(`POST /explain failed: ${res.status}`);
+    const data = await res.json();
+
+    aiNarrativeText.textContent = data.narrative;
+    aiActionText.textContent = data.recommended_action;
+    aiSourceBadge.textContent = data.source === 'gemini' ? 'Gemini' : 'Analyst template';
+    aiSourceBadge.classList.add('visible', data.source === 'gemini' ? 'gemini' : 'template');
+    aiAnalystContent.classList.add('visible');
+  } catch (err) {
+    aiNarrativeText.textContent = `AI Risk Analyst unavailable: ${err.message}`;
+    aiActionText.textContent = '';
+    aiAnalystContent.classList.add('visible');
+  } finally {
+    aiAnalystLoading.classList.remove('visible');
+  }
+}
+
 function toggleExplainRow(tr) {
   const next = tr.nextElementSibling;
   if (next && next.classList.contains('explain-row') && next._forRow === tr) {
@@ -877,6 +1017,10 @@ function toggleExplainRow(tr) {
   td.innerHTML = `<div class="explain-title">Why this score</div><div class="chip-row">${chipsRowHTML(tr._topFeatures)}</div>`;
   explainTr.appendChild(td);
   tr.after(explainTr);
+
+  // Clicking a row is one of the two triggers for the AI Risk Analyst panel
+  // (the other is an automatic call when checkout blocks a transaction).
+  if (tr._amount != null && tr._result) requestAiExplanation(tr._amount, tr._result);
 }
 
 function recordScoredTransaction(amount, result) {
@@ -886,18 +1030,20 @@ function recordScoredTransaction(amount, result) {
   // actually decides on; fall back to fraud_probability against an older
   // backend that doesn't return it yet.
   const risk = typeof result.final_risk === 'number' ? result.final_risk : result.fraud_probability;
-  addRow(amount, result.fraud_probability, risk, result.is_fraud, result.latency_ms, result.top_features);
+  addRow(amount, result.fraud_probability, risk, result.is_fraud, result.latency_ms, result.top_features, result);
   addToHistogram(result.fraud_probability, result.is_fraud);
   applyThreshold();
   drawHistogram();
 }
 
-function addRow(amount, proba, risk, isFraud, latencyMs, topFeatures) {
+function addRow(amount, proba, risk, isFraud, latencyMs, topFeatures, result) {
   emptyState.style.display = 'none';
   const tr = document.createElement('tr');
   tr.classList.add(isFraud ? 'fraud' : 'safe', 'row-enter');
   tr._topFeatures = topFeatures || [];
   tr._risk = risk;
+  tr._amount = amount;
+  tr._result = result || null;
   const time = new Date().toLocaleTimeString();
   tr.innerHTML = `
     <td>${time}</td>
@@ -1214,6 +1360,10 @@ async function runCheckout(force) {
     if (result.is_fraud) {
       fraudBanner.classList.add('fraud');
       setCheckoutStatus('Blocked before checkout.', false);
+      // Fire-and-forget: the block/allow decision above is already final by
+      // this point. The AI Risk Analyst call runs after, purely to narrate
+      // it -- nothing here waits on it or depends on its result.
+      requestAiExplanation(amount, result);
     } else {
       legitBanner.classList.add('legit');
       setCheckoutStatus('Risk check passed. Opening Razorpay...', false);

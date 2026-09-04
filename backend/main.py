@@ -3,13 +3,19 @@ FastAPI backend for the real-time fraud detection demo.
 
 Loads the XGBoost model trained by model/train.py and exposes:
   GET  /health    -> liveness check
+  GET  /metrics   -> running latency percentiles for this process
   GET  /features  -> ordered feature list the model expects
   GET  /sample    -> a randomly generated transaction (for demo/streaming)
   POST /predict   -> score a transaction, returns fraud probability + verdict
                       + the top contributing features ("explainability")
+  POST /explain   -> "AI Risk Analyst": an LLM (or templated-fallback)
+                      natural-language narrative for an already-scored
+                      transaction. Strictly post-decision -- see the
+                      module docstring on /explain below for why.
 """
 
 import json
+import os
 import threading
 import time
 from collections import defaultdict, deque
@@ -19,15 +25,21 @@ from typing import Any, Dict, List
 import joblib
 import numpy as np
 import pandas as pd
+from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, RootModel
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+BACKEND_DIR = Path(__file__).resolve().parent
 ARTIFACTS_DIR = BASE_DIR / "model" / "artifacts"
 MODEL_PATH = ARTIFACTS_DIR / "fraud_model.pkl"
 FEATURES_PATH = ARTIFACTS_DIR / "feature_names.json"
 FEATURE_STATS_PATH = ARTIFACTS_DIR / "feature_stats.json"
+
+# Looked up by absolute path (not a bare `load_dotenv()`) so GEMINI_API_KEY
+# loads correctly regardless of the process's current working directory.
+load_dotenv(BACKEND_DIR / ".env")
 
 FRAUD_THRESHOLD = 0.5
 TOP_FEATURES_COUNT = 4
@@ -138,6 +150,154 @@ def compute_rule_score(txn_count_last_60s: int, amount_vs_avg: float) -> float:
     amount_score = min(1.0, abs(amount_vs_avg - 1.0) / 4.0)
     return max(velocity_score, amount_score)
 
+
+# --- AI Risk Analyst (POST /explain) ----------------------------------------
+#
+# This is deliberately a SEPARATE endpoint from /predict, never called from
+# within it. /predict's block/allow decision (final_risk vs FRAUD_THRESHOLD)
+# is already final -- computed, logged, and returned -- before /explain is
+# ever invoked. An LLM call is 100s-1000s of ms; putting that anywhere on the
+# checkout hot path would defeat the entire point of a sub-5ms real-time
+# scorer. The frontend calls /explain only *after* /predict has returned,
+# purely to narrate a decision that's already been made.
+#
+# GEMINI_API_KEY is optional. If it's unset, the google-generativeai import
+# fails, or the API call itself errors or exceeds GEMINI_TIMEOUT_SECONDS, we
+# fall back to a deterministic templated narrative built from the same
+# signals -- /explain always returns a normal 200 with the same response
+# shape either way, so the demo can never break on a flaky network or a
+# missing key.
+GEMINI_MODEL_NAME = "gemini-3.1-flash-lite"
+# Measured empirically: a real structured narrative+action response takes
+# 2-10s depending on load (it's not on the hot path, so that's fine -- see
+# the module docstring above /explain). Give it real headroom rather than a
+# guessed ~3s that would silently force every call to the fallback. This
+# model was also chosen over "gemini-flash-latest" because the free tier's
+# per-model *daily* quota (not just per-minute) is tight -- 20 requests/day
+# on the newest model at time of writing -- and flash-lite tiers tend to
+# have separate, less contended quota pools.
+GEMINI_TIMEOUT_SECONDS = 20.0
+
+_gemini_model = None
+ai_analyst_mode = "fallback"  # "gemini" | "fallback"
+
+
+class ExplainFeature(BaseModel):
+    feature: str
+    label: str
+    direction: str
+    magnitude: float = 0.0
+
+
+class ExplainRequest(BaseModel):
+    final_risk: float
+    model_score: float
+    rule_score: float
+    txn_count_last_60s: int
+    amount_vs_avg: float
+    top_features: List[ExplainFeature] = []
+    is_fraud: bool | None = None
+    amount: float | None = None
+
+
+class ExplainResponse(BaseModel):
+    narrative: str
+    recommended_action: str
+    source: str  # "gemini" | "fallback" -- which path actually produced this response
+
+
+def _verdict_blocked(req: "ExplainRequest") -> bool:
+    return req.is_fraud if req.is_fraud is not None else req.final_risk > FRAUD_THRESHOLD
+
+
+def _gemini_prompt(req: "ExplainRequest") -> str:
+    features_desc = "; ".join(f"{f.label} ({f.direction})" for f in req.top_features) or "none notable"
+    verdict = "BLOCKED" if _verdict_blocked(req) else "ALLOWED"
+    amount_line = f"- Transaction amount: Rs.{req.amount:.2f}\n" if req.amount is not None else ""
+    return (
+        "You are a fraud risk analyst reviewing an automated transaction-scoring "
+        "decision for a payments dashboard. Given the signals below, write a concise "
+        "2-3 sentence explanation of why the transaction scored the way it did, "
+        "referencing the specific numbers, then a one-sentence recommended action. "
+        "Do not repeat the raw numbers back as a list -- write prose. Do not use markdown.\n\n"
+        "Signals:\n"
+        f"{amount_line}"
+        f"- Final risk score: {req.final_risk:.3f} (0-1 scale; block threshold is 0.5)\n"
+        f"- ML model score: {req.model_score:.3f}\n"
+        f"- Velocity/rule-layer score: {req.rule_score:.3f}\n"
+        f"- Transactions from this account in the last 60s: {req.txn_count_last_60s}\n"
+        f"- Amount vs this account's running average: {req.amount_vs_avg:.2f}x\n"
+        f"- Top contributing model features: {features_desc}\n"
+        f"- Verdict: {verdict}\n\n"
+        "Respond in exactly this format:\n"
+        "NARRATIVE: <2-3 sentences>\n"
+        "ACTION: <one sentence>"
+    )
+
+
+def _parse_gemini_text(text: str) -> tuple[str, str]:
+    narrative, action = "", ""
+    for line in text.splitlines():
+        line = line.strip()
+        if line[:10].upper() == "NARRATIVE:":
+            narrative = line.split(":", 1)[1].strip()
+        elif line[:7].upper() == "ACTION:":
+            action = line.split(":", 1)[1].strip()
+    if not narrative:
+        narrative = text.strip()
+    if not action:
+        action = "Review manually if the automated verdict seems uncertain."
+    return narrative, action
+
+
+def _fallback_explanation(req: "ExplainRequest") -> tuple[str, str]:
+    """Deterministic, template-based narrative built from the same signals
+    the Gemini prompt uses -- guarantees /explain always has a sensible
+    answer with zero external dependencies."""
+    blocked = _verdict_blocked(req)
+    risk_pct = req.final_risk * 100
+
+    reasons = []
+    if req.rule_score >= req.model_score and req.rule_score > 0:
+        if req.txn_count_last_60s > 3:
+            reasons.append(
+                f"{req.txn_count_last_60s} transactions from this account in the last 60 seconds, "
+                "an unusually high velocity consistent with card-testing or automated abuse"
+            )
+        if abs(req.amount_vs_avg - 1.0) > 1.0:
+            direction = "well above" if req.amount_vs_avg > 1 else "well below"
+            reasons.append(
+                f"an amount {req.amount_vs_avg:.1f}x this account's running average, {direction} typical spend"
+            )
+    for f in req.top_features[:2]:
+        if f.direction == "up":
+            reasons.append(f.label)
+    if not reasons:
+        reasons.append("a broad combination of factors with no single dominant signal")
+
+    reason_text = "; ".join(reasons)
+
+    if blocked:
+        narrative = (
+            f"This transaction was blocked with a combined risk score of {risk_pct:.1f}%. "
+            f"The main drivers were {reason_text}. "
+        )
+        narrative += (
+            "This looks like velocity/behavior-driven risk rather than a static model signal alone."
+            if req.rule_score > req.model_score
+            else "The ML model matched transaction-level patterns consistent with historical fraud."
+        )
+        action = "Keep this transaction blocked and require step-up verification (OTP/3DS) before any retry."
+    else:
+        narrative = (
+            f"This transaction scored a low {risk_pct:.1f}% combined risk. "
+            f"{reason_text.capitalize()}, with no velocity or amount anomalies detected."
+        )
+        action = "Allow the transaction to proceed; no manual review needed."
+
+    return narrative, action
+
+
 # SHAP TreeExplainer benchmarks at ~3ms/call on this model (measured), well
 # inside a real-time budget on top of the ~2-3ms predict_proba call. If a
 # startup self-test ever shows it running slower than this, we drop to the
@@ -220,6 +380,7 @@ explain_mode = "unavailable"  # "shap" | "fallback" | "unavailable"
 @app.on_event("startup")
 def load_artifacts():
     global model, feature_names, feature_stats, shap_explainer, explain_mode
+    global _gemini_model, ai_analyst_mode
     if not MODEL_PATH.exists() or not FEATURES_PATH.exists():
         raise RuntimeError(
             f"Model artifacts not found in {ARTIFACTS_DIR}. Run `python model/train.py` first."
@@ -254,6 +415,26 @@ def load_artifacts():
         explain_mode = "fallback" if feature_stats else "unavailable"
 
     print(f"[explain] mode = {explain_mode}")
+
+    # AI Risk Analyst (POST /explain): try to stand up a Gemini client if a
+    # key is configured. Any failure here (missing key, missing package,
+    # invalid key) just leaves _gemini_model as None -- /explain falls back
+    # to the templated narrative per-request, it never raises on startup.
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if api_key:
+        try:
+            import google.generativeai as genai
+
+            genai.configure(api_key=api_key)
+            _gemini_model = genai.GenerativeModel(GEMINI_MODEL_NAME)
+            ai_analyst_mode = "gemini"
+        except Exception:
+            _gemini_model = None
+            ai_analyst_mode = "fallback"
+    else:
+        ai_analyst_mode = "fallback"
+
+    print(f"[ai-analyst] mode = {ai_analyst_mode}")
 
 
 class Transaction(RootModel[Dict[str, Any]]):
@@ -454,3 +635,28 @@ def predict(transaction: Transaction):
         latency_ms=round(latency_ms, 3),
         top_features=top_features,
     )
+
+
+@app.post("/explain", response_model=ExplainResponse)
+def explain(req: ExplainRequest):
+    """AI Risk Analyst narrative for an already-scored transaction.
+
+    Deliberately NOT called from /predict and has no bearing on any block/
+    allow decision -- by the time this runs, /predict has already returned
+    and the transaction has already been let through or stopped. This exists
+    purely to narrate that decision in natural language, asynchronously,
+    after the fact.
+    """
+    if _gemini_model is not None:
+        try:
+            response = _gemini_model.generate_content(
+                _gemini_prompt(req),
+                request_options={"timeout": GEMINI_TIMEOUT_SECONDS},
+            )
+            narrative, action = _parse_gemini_text(response.text)
+            return ExplainResponse(narrative=narrative, recommended_action=action, source="gemini")
+        except Exception:
+            pass  # any failure (timeout, network, bad key, empty response) -> fall through
+
+    narrative, action = _fallback_explanation(req)
+    return ExplainResponse(narrative=narrative, recommended_action=action, source="fallback")
