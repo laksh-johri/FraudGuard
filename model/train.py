@@ -24,6 +24,7 @@ from sklearn.metrics import (
     recall_score,
     f1_score,
     roc_auc_score,
+    average_precision_score,
     confusion_matrix,
 )
 from xgboost import XGBClassifier
@@ -106,13 +107,15 @@ def main():
     recall = recall_score(y_test, y_pred, zero_division=0)
     f1 = f1_score(y_test, y_pred, zero_division=0)
     roc_auc = roc_auc_score(y_test, y_proba)
+    pr_auc = average_precision_score(y_test, y_proba)
     cm = confusion_matrix(y_test, y_pred)
 
     print("\n=== Test set metrics ===")
+    print(f"ROC-AUC:   {roc_auc:.4f}")
+    print(f"PR-AUC:    {pr_auc:.4f}  (average precision)")
     print(f"Precision: {precision:.4f}")
     print(f"Recall:    {recall:.4f}")
     print(f"F1:        {f1:.4f}")
-    print(f"ROC-AUC:   {roc_auc:.4f}")
     print("Confusion matrix ([[TN, FP], [FN, TP]]):")
     print(cm)
 
