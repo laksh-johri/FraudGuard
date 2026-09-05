@@ -522,6 +522,10 @@
   .badge.fraud { background: var(--red-bg); color: var(--red); }
   .badge.ok { background: var(--green-bg); color: var(--green); }
 
+  .risk-cell { display: flex; flex-direction: column; gap: 1px; }
+  .risk-primary { font-weight: 700; }
+  .risk-secondary { font-size: 10px; color: var(--muted); font-weight: 500; }
+
   tbody tr:not(.explain-row) { cursor: pointer; }
 
   /* ---------- Explainability chips ---------- */
@@ -549,6 +553,17 @@
   }
 
   .chip-row { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip-row + .chip-row { margin-top: 8px; }
+  .chip-row.secondary { opacity: 0.8; }
+
+  .chip-secondary-label {
+    font-size: 10px;
+    color: var(--muted-dim);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin: 10px 0 6px;
+  }
 
   .explain-title {
     font-size: 10.5px;
@@ -816,7 +831,7 @@
       </div>
       <div id="explainPanel" class="explain-block" style="display:none;">
         <div class="explain-title">Why this score</div>
-        <div class="chip-row" id="explainChips"></div>
+        <div id="explainChips"></div>
       </div>
     </div>
   </section>
@@ -870,7 +885,7 @@
           <tr>
             <th>Time</th>
             <th>Amount (₹)</th>
-            <th>Fraud Probability</th>
+            <th>Risk Score</th>
             <th>Verdict</th>
             <th>Latency (ms)</th>
           </tr>
@@ -940,11 +955,78 @@ function chipHTML(feature) {
   return `<span class="chip ${feature.direction}"><span class="arrow">${arrow}</span>${feature.label}</span>`;
 }
 
-function chipsRowHTML(topFeatures) {
-  if (!topFeatures || !topFeatures.length) {
-    return '<span class="explain-empty">No explanation available for this score.</span>';
+// The hybrid verdict is max(model_score, rule_score) -- see backend
+// compute_rule_score/predict. Whenever the rule/velocity layer is what's
+// actually >= the model score, it's the real reason the transaction is
+// risky, so the explanation must lead with that instead of the model's SHAP
+// chips (which can legitimately all look "normal" while a rule fires).
+function isRuleDriven(result) {
+  return !!result
+    && typeof result.rule_score === 'number'
+    && typeof result.model_score === 'number'
+    && result.rule_score >= result.model_score
+    && result.rule_score > 0;
+}
+
+// Mirrors compute_rule_score's two sub-scores (backend/main.py) so the lead
+// chip names whichever signal actually drove rule_score, using the real
+// txn_count_last_60s / amount_vs_avg numbers rather than a generic label.
+function ruleReasonChips(result) {
+  const velocityScore = Math.min(1, Math.max(0, result.txn_count_last_60s - 1) / 5);
+  const amountScore = Math.min(1, Math.abs(result.amount_vs_avg - 1) / 4);
+  const entries = [];
+
+  if (velocityScore > 0) {
+    entries.push({
+      score: velocityScore,
+      html: `<span class="chip up"><span class="arrow">⚡</span>velocity spike: ${result.txn_count_last_60s} transactions in 60s</span>`,
+    });
   }
-  return topFeatures.map(chipHTML).join('');
+  if (amountScore > 0) {
+    const ratio = result.amount_vs_avg;
+    const label = ratio >= 1
+      ? `amount ${ratio.toFixed(1)}× user average`
+      : `amount ${ratio.toFixed(2)}× user average (well below normal)`;
+    entries.push({
+      score: amountScore,
+      html: `<span class="chip up"><span class="arrow">↑</span>${label}</span>`,
+    });
+  }
+  if (!entries.length) {
+    entries.push({
+      score: 0,
+      html: '<span class="chip up"><span class="arrow">⚡</span>velocity/amount risk layer triggered</span>',
+    });
+  }
+
+  entries.sort((a, b) => b.score - a.score);
+  return entries.map((e) => e.html);
+}
+
+// Builds the full "why this score" chip markup for one scored transaction.
+// When the rule layer drove the decision, the red rule chip(s) lead and the
+// model's SHAP chips (which may all look "normal") are demoted to a labeled
+// secondary row, so the explanation never contradicts the verdict. When the
+// model score drove it, behavior is unchanged from before.
+function chipsBlockHTML(result) {
+  if (!result) {
+    return '<div class="chip-row"><span class="explain-empty">No explanation available for this score.</span></div>';
+  }
+  const topFeatures = result.top_features || [];
+
+  if (isRuleDriven(result)) {
+    const lead = ruleReasonChips(result).join('');
+    let html = `<div class="chip-row">${lead}</div>`;
+    if (topFeatures.length) {
+      html += `<div class="chip-secondary-label">Model signal (secondary)</div><div class="chip-row secondary">${topFeatures.map(chipHTML).join('')}</div>`;
+    }
+    return html;
+  }
+
+  if (!topFeatures.length) {
+    return '<div class="chip-row"><span class="explain-empty">No explanation available for this score.</span></div>';
+  }
+  return `<div class="chip-row">${topFeatures.map(chipHTML).join('')}</div>`;
 }
 
 // --- AI Risk Analyst (POST /explain) ---
@@ -1014,7 +1096,7 @@ function toggleExplainRow(tr) {
   explainTr._forRow = tr;
   const td = document.createElement('td');
   td.colSpan = 5;
-  td.innerHTML = `<div class="explain-title">Why this score</div><div class="chip-row">${chipsRowHTML(tr._topFeatures)}</div>`;
+  td.innerHTML = `<div class="explain-title">Why this score</div>${chipsBlockHTML(tr._result)}`;
   explainTr.appendChild(td);
   tr.after(explainTr);
 
@@ -1048,7 +1130,12 @@ function addRow(amount, proba, risk, isFraud, latencyMs, topFeatures, result) {
   tr.innerHTML = `
     <td>${time}</td>
     <td>₹${amount.toFixed(2)}</td>
-    <td>${(proba * 100).toFixed(2)}%</td>
+    <td>
+      <div class="risk-cell">
+        <span class="risk-primary">${(risk * 100).toFixed(2)}%</span>
+        <span class="risk-secondary">model ${(proba * 100).toFixed(2)}%</span>
+      </div>
+    </td>
     <td><span class="badge ${isFraud ? 'fraud' : 'ok'}">${isFraud ? 'FRAUD' : 'OK'}</span></td>
     <td>${latencyMs.toFixed(3)}</td>
   `;
@@ -1066,7 +1153,7 @@ function addRow(amount, proba, risk, isFraud, latencyMs, topFeatures, result) {
     dataRows = feedEl.querySelectorAll('tr:not(.explain-row)');
   }
 
-  if (isFraud && tr._topFeatures.length) toggleExplainRow(tr);
+  if (isFraud && (tr._topFeatures.length || isRuleDriven(result))) toggleExplainRow(tr);
 }
 
 // --- Interactive risk-threshold slider ---
@@ -1285,12 +1372,13 @@ function hideCheckoutBanners() {
   explainPanel.style.display = 'none';
 }
 
-function showExplainPanel(topFeatures) {
-  if (!topFeatures || !topFeatures.length) {
+function showExplainPanel(result) {
+  const topFeatures = (result && result.top_features) || [];
+  if (!isRuleDriven(result) && !topFeatures.length) {
     explainPanel.style.display = 'none';
     return;
   }
-  explainChips.innerHTML = chipsRowHTML(topFeatures);
+  explainChips.innerHTML = chipsBlockHTML(result);
   explainPanel.style.display = 'block';
 }
 
@@ -1353,8 +1441,9 @@ async function runCheckout(force) {
     if (!predictRes.ok) throw new Error(`POST /predict failed: ${predictRes.status}`);
     const result = await predictRes.json();
 
-    showDebugPanel(result.fraud_probability, result.latency_ms, amount);
-    showExplainPanel(result.top_features);
+    const checkoutRisk = typeof result.final_risk === 'number' ? result.final_risk : result.fraud_probability;
+    showDebugPanel(checkoutRisk, result.latency_ms, amount);
+    showExplainPanel(result);
     recordScoredTransaction(amount, result);
 
     if (result.is_fraud) {
