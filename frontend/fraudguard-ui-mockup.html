@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>FraudGuard UI Reference</title>
+<style>
+  :root{
+    --bg:#08090a;
+    --surface:#0f1011;
+    --surface-2:#141517;
+    --surface-hover:#17181b;
+    --border:rgba(255,255,255,0.07);
+    --border-strong:rgba(255,255,255,0.11);
+    --text:#ededee;
+    --text-2:#9a9ba1;
+    --text-3:#63666e;
+    --accent:#6e63d2;
+    --accent-2:#8b82f0;
+    --accent-soft:rgba(110,99,210,0.14);
+    --green:#3fb27f;
+    --green-soft:rgba(63,178,127,0.12);
+    --red:#e5565b;
+    --red-soft:rgba(229,86,91,0.12);
+    --amber:#d99a3a;
+    --amber-soft:rgba(217,154,58,0.12);
+    --mono:ui-monospace,"SF Mono","JetBrains Mono",Menlo,monospace;
+    --radius:10px;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{
+    font-family:"Inter",-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    background:var(--bg);
+    color:var(--text);
+    font-size:14px;
+    line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+    letter-spacing:-0.01em;
+  }
+  .wrap{max-width:1240px;margin:0 auto;padding:0 24px}
+
+  /* ---------- top nav ---------- */
+  .nav{
+    display:flex;align-items:center;justify-content:space-between;
+    height:60px;border-bottom:1px solid var(--border);
+    position:sticky;top:0;background:rgba(8,9,10,0.8);backdrop-filter:blur(12px);z-index:10;
+  }
+  .brand{display:flex;align-items:center;gap:11px}
+  .mark{
+    width:30px;height:30px;border-radius:8px;
+    background:linear-gradient(135deg,var(--accent),var(--accent-2));
+    display:flex;align-items:center;justify-content:center;
+    box-shadow:0 0 0 1px rgba(255,255,255,0.06) inset;
+  }
+  .mark svg{width:17px;height:17px;fill:#fff}
+  .brand-text{display:flex;flex-direction:column;line-height:1.15}
+  .brand-text b{font-size:14.5px;font-weight:600;letter-spacing:-0.02em}
+  .brand-text span{font-size:11px;color:var(--text-3)}
+  .nav-right{display:flex;align-items:center;gap:14px}
+  .pill{
+    display:inline-flex;align-items:center;gap:7px;
+    font-size:12px;font-weight:500;color:var(--text-2);
+    background:var(--surface);border:1px solid var(--border);
+    padding:5px 11px;border-radius:999px;
+  }
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--green);position:relative}
+  .dot::after{content:"";position:absolute;inset:-3px;border-radius:50%;background:var(--green);opacity:.35;animation:pulse 2s infinite}
+  @keyframes pulse{0%{transform:scale(1);opacity:.35}70%{transform:scale(2.2);opacity:0}100%{opacity:0}}
+  .lat-pill b{color:var(--text);font-family:var(--mono);font-weight:500}
+
+  /* ---------- section ---------- */
+  .section-pad{padding:26px 0 40px}
+  .eyebrow{font-size:11px;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--text-3);margin-bottom:14px}
+
+  /* ---------- metric cards ---------- */
+  .metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:26px}
+  .metric{
+    background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+    padding:18px 18px 16px;position:relative;overflow:hidden;
+  }
+  .metric .label{font-size:11px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--text-3)}
+  .metric .val{font-family:var(--mono);font-size:27px;font-weight:600;margin-top:10px;letter-spacing:-0.02em;font-variant-numeric:tabular-nums}
+  .metric .sub{font-size:11.5px;color:var(--text-3);margin-top:5px}
+  .metric.flag .val{color:var(--red)}
+  .metric .spark{position:absolute;right:14px;top:16px;opacity:.5}
+
+  /* ---------- grid ---------- */
+  .grid{display:grid;grid-template-columns:0.9fr 1.1fr;gap:14px;align-items:start}
+  .col{display:flex;flex-direction:column;gap:14px}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:18px}
+  .card-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:16px}
+  .card-title{font-size:14px;font-weight:600;letter-spacing:-0.01em}
+  .card-hint{font-size:12px;color:var(--text-3)}
+
+  /* ---------- checkout ---------- */
+  .product{display:flex;gap:13px;align-items:center;padding:13px;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;margin-bottom:14px}
+  .thumb{width:44px;height:44px;border-radius:8px;background:linear-gradient(135deg,#26272b,#1a1b1e);flex-shrink:0;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:18px}
+  .product .pname{font-size:13.5px;font-weight:550}
+  .product .pmeta{font-size:12px;color:var(--text-3)}
+  .product .price{margin-left:auto;font-family:var(--mono);font-size:15px;font-weight:600}
+  .btn{
+    width:100%;border:none;border-radius:9px;padding:11px;font-size:13.5px;font-weight:600;
+    font-family:inherit;cursor:pointer;letter-spacing:-0.01em;transition:.15s;
+  }
+  .btn-primary{background:var(--accent);color:#fff;box-shadow:0 1px 0 rgba(255,255,255,0.08) inset}
+  .btn-primary:hover{background:var(--accent-2)}
+  .btn-row{display:flex;gap:9px;margin-top:9px}
+  .btn-ghost{background:var(--surface-2);color:var(--text-2);border:1px solid var(--border);font-size:12.5px;padding:9px}
+  .btn-ghost:hover{background:var(--surface-hover);color:var(--text)}
+  .debug{margin-top:14px;padding:12px 13px;background:var(--surface-2);border:1px solid var(--border);border-radius:9px;display:flex;justify-content:space-between;font-family:var(--mono);font-size:12px}
+  .debug .k{color:var(--text-3)}
+  .debug .v{color:var(--text);font-weight:500}
+
+  /* ---------- histogram ---------- */
+  .hist{height:150px;display:flex;align-items:flex-end;gap:3px;padding-top:8px;position:relative}
+  .bar{flex:1;border-radius:3px 3px 0 0;min-height:2px;position:relative}
+  .bar .g{position:absolute;bottom:0;left:0;right:0;background:var(--green);border-radius:3px 3px 0 0}
+  .bar .r{position:absolute;bottom:0;left:0;right:0;background:var(--red);border-radius:3px 3px 0 0}
+  .thresh-line{position:absolute;top:0;bottom:22px;width:2px;background:var(--amber);border-radius:2px}
+  .thresh-line::after{content:"0.50";position:absolute;top:-2px;left:6px;font-family:var(--mono);font-size:10px;color:var(--amber);white-space:nowrap}
+  .hist-axis{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--text-3);margin-top:8px}
+  .hist-legend{display:flex;gap:16px;margin-top:12px;font-size:11.5px;color:var(--text-2)}
+  .hist-legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:6px;vertical-align:middle}
+
+  /* ---------- AI analyst ---------- */
+  .analyst{border:1px solid var(--border);background:linear-gradient(180deg,rgba(110,99,210,0.05),transparent 60%),var(--surface)}
+  .badge{display:inline-flex;align-items:center;gap:6px;font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;padding:3px 9px;border-radius:999px}
+  .badge-gemini{background:var(--accent-soft);color:var(--accent-2);border:1px solid rgba(110,99,210,0.25)}
+  .analyst-body{font-size:13.5px;color:var(--text);line-height:1.6}
+  .analyst-body .muted{color:var(--text-2)}
+  .rec{margin-top:14px;padding:12px 13px;border-radius:9px;background:var(--red-soft);border:1px solid rgba(229,86,91,0.2);display:flex;gap:10px;align-items:flex-start}
+  .rec svg{width:15px;height:15px;fill:var(--red);flex-shrink:0;margin-top:2px}
+  .rec .rlabel{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--red);margin-bottom:3px}
+  .rec .rtext{font-size:12.5px;color:var(--text)}
+
+  /* ---------- slider ---------- */
+  .slider-card{display:flex;align-items:center;gap:16px}
+  .slider-card .slabel{font-size:12.5px;color:var(--text-2);font-weight:500;white-space:nowrap}
+  .track{flex:1;height:5px;border-radius:999px;background:var(--surface-2);position:relative}
+  .track .fill{position:absolute;left:0;top:0;bottom:0;width:0%;background:linear-gradient(90deg,var(--accent),var(--accent-2));border-radius:999px}
+  .track .knob{position:absolute;left:0%;top:50%;transform:translate(-50%,-50%);width:15px;height:15px;border-radius:50%;background:#fff;box-shadow:0 0 0 4px rgba(110,99,210,0.2),0 2px 4px rgba(0,0,0,.4)}
+  .sval{font-family:var(--mono);font-size:14px;font-weight:600;min-width:38px}
+  .blockrate{font-family:var(--mono);font-size:11.5px;font-weight:600;color:var(--amber);background:var(--amber-soft);border:1px solid rgba(217,154,58,0.22);padding:5px 10px;border-radius:999px;white-space:nowrap}
+
+  /* ---------- feed ---------- */
+  .feed-head,.feed-row{display:grid;grid-template-columns:118px 1fr 1.1fr 90px 78px;gap:12px;align-items:center;padding:11px 14px}
+  .feed-head{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);border-bottom:1px solid var(--border)}
+  .feed-row{border-bottom:1px solid var(--border);font-size:13px;position:relative}
+  .feed-row:hover{background:var(--surface-hover)}
+  .feed-row.fraud{background:linear-gradient(90deg,rgba(229,86,91,0.06),transparent 40%)}
+  .feed-row.fraud::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--red)}
+  .feed-row.ok::before{content:"";position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--green)}
+  .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
+  .muted-mono{font-family:var(--mono);font-size:11px;color:var(--text-3)}
+  .risk-cell b{font-family:var(--mono);font-size:14px;font-weight:600}
+  .risk-cell.hi b{color:var(--red)}
+  .risk-cell small{display:block;font-family:var(--mono);font-size:10.5px;color:var(--text-3);font-weight:400}
+  .verdict{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;padding:3px 9px;border-radius:6px;letter-spacing:.02em}
+  .v-fraud{background:var(--red-soft);color:var(--red)}
+  .v-ok{background:var(--green-soft);color:var(--green)}
+  .why{padding:14px;background:var(--surface-2);border-bottom:1px solid var(--border)}
+  .why-label{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-3);margin-bottom:11px}
+  .chips{display:flex;flex-wrap:wrap;gap:8px}
+  .chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:6px 11px;border-radius:7px;border:1px solid var(--border);background:var(--surface)}
+  .chip.up{border-color:rgba(229,86,91,0.3);background:var(--red-soft);color:#f2999c}
+  .chip.up.lead{border-color:rgba(229,86,91,0.5);font-weight:600}
+  .chip.down{color:#84c9a6}
+  .chip .ar{font-family:var(--mono);font-weight:700}
+  .chip-sub{font-size:10.5px;color:var(--text-3);margin:12px 0 8px;font-weight:500}
+
+  @media(max-width:920px){.grid{grid-template-columns:1fr}.metrics{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap" style="display:flex;align-items:center;justify-content:space-between;width:100%">
+    <div class="brand">
+      <div class="mark"><svg viewBox="0 0 24 24"><path d="M12 2l7 3v6c0 4.4-3 8.5-7 9.9C8 19.5 5 15.4 5 11V5l7-3z"/></svg></div>
+      <div class="brand-text"><b>FraudGuard</b><span>Real-Time Risk Engine</span></div>
+    </div>
+    <div class="nav-right">
+      <span class="pill lat-pill">avg&nbsp;<b>2.1ms</b></span>
+      <span class="pill"><span class="dot"></span>Live</span>
+    </div>
+  </div>
+</nav>
+
+<div class="wrap section-pad">
+
+  <!-- metrics -->
+  <div class="metrics">
+    <div class="metric">
+      <div class="label">Total Scored</div>
+      <div class="val">1,284</div>
+      <div class="sub">this session</div>
+    </div>
+    <div class="metric flag">
+      <div class="label">Flagged Fraud</div>
+      <div class="val">37</div>
+      <div class="sub">blocked before checkout</div>
+    </div>
+    <div class="metric">
+      <div class="label">Fraud Rate</div>
+      <div class="val">2.9%</div>
+      <div class="sub">of visible feed</div>
+    </div>
+    <div class="metric">
+      <div class="label">Avg Latency</div>
+      <div class="val">2.1<span style="font-size:15px;color:var(--text-3)">ms</span></div>
+      <div class="sub">p99 · 3.8ms</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <!-- LEFT COLUMN -->
+    <div class="col">
+      <!-- checkout -->
+      <div class="card">
+        <div class="card-head"><div class="card-title">Live Scoring</div><div class="card-hint">gated by risk engine</div></div>
+        <div class="product">
+          <div class="thumb">🎧</div>
+          <div><div class="pname">Wireless Headphones</div><div class="pmeta">Razorpay test mode</div></div>
+          <div class="price">₹2,499</div>
+        </div>
+        <button class="btn btn-primary">Pay Now</button>
+        <div class="btn-row">
+          <button class="btn btn-ghost">Simulate legit</button>
+          <button class="btn btn-ghost">Simulate fraud</button>
+        </div>
+        <div class="debug">
+          <span><span class="k">risk_score</span> <span class="v">0.94</span></span>
+          <span><span class="k">latency</span> <span class="v">2.03ms</span></span>
+        </div>
+      </div>
+
+      <!-- histogram -->
+      <div class="card">
+        <div class="card-head"><div class="card-title">Score Distribution</div><div class="card-hint">1,284 scored</div></div>
+        <div class="hist">
+          <div class="thresh-line" style="left:50%"></div>
+          <div class="bar"><div class="g" style="height:88%"></div></div>
+          <div class="bar"><div class="g" style="height:64%"></div></div>
+          <div class="bar"><div class="g" style="height:40%"></div></div>
+          <div class="bar"><div class="g" style="height:26%"></div></div>
+          <div class="bar"><div class="g" style="height:16%"></div></div>
+          <div class="bar"><div class="g" style="height:11%"></div></div>
+          <div class="bar"><div class="g" style="height:7%"></div></div>
+          <div class="bar"><div class="g" style="height:5%"></div></div>
+          <div class="bar"><div class="g" style="height:4%"></div></div>
+          <div class="bar"><div class="g" style="height:3%"></div></div>
+          <div class="bar"><div class="r" style="height:3%"></div></div>
+          <div class="bar"><div class="r" style="height:4%"></div></div>
+          <div class="bar"><div class="r" style="height:5%"></div></div>
+          <div class="bar"><div class="r" style="height:6%"></div></div>
+          <div class="bar"><div class="r" style="height:8%"></div></div>
+          <div class="bar"><div class="r" style="height:11%"></div></div>
+          <div class="bar"><div class="r" style="height:15%"></div></div>
+          <div class="bar"><div class="r" style="height:22%"></div></div>
+          <div class="bar"><div class="r" style="height:34%"></div></div>
+          <div class="bar"><div class="r" style="height:52%"></div></div>
+        </div>
+        <div class="hist-axis"><span>0.0</span><span>0.25</span><span>0.5</span><span>0.75</span><span>1.0</span></div>
+        <div class="hist-legend"><span><i style="background:var(--green)"></i>Legit</span><span><i style="background:var(--red)"></i>Fraud</span><span><i style="background:var(--amber)"></i>Threshold</span></div>
+      </div>
+    </div>
+
+    <!-- RIGHT COLUMN -->
+    <div class="col">
+      <!-- AI analyst -->
+      <div class="card analyst">
+        <div class="card-head">
+          <div class="card-title">AI Risk Analyst</div>
+          <span class="badge badge-gemini">✦ Gemini</span>
+        </div>
+        <div class="analyst-body">
+          This transaction was blocked due to an <b>aggressive velocity of 8 attempts within a single minute</b>, combined with a charge <b>8× the cardholder's typical amount</b>. <span class="muted">The base model scored it low (0.3%), but these behavioral signals indicate a likely automated card-testing attack.</span>
+        </div>
+        <div class="rec">
+          <svg viewBox="0 0 24 24"><path d="M12 2L1 21h22L12 2zm0 6l6.5 11h-13L12 8zm-1 3v4h2v-4h-2zm0 5v2h2v-2h-2z"/></svg>
+          <div><div class="rlabel">Recommended Action</div><div class="rtext">Maintain the block and initiate a temporary account suspension pending cardholder verification.</div></div>
+        </div>
+      </div>
+
+      <!-- slider -->
+      <div class="card slider-card">
+        <span class="slabel">Risk Threshold</span>
+        <div class="track"><div class="fill" style="width:50%"></div><div class="knob" style="left:50%"></div></div>
+        <span class="sval">0.50</span>
+        <span class="blockrate">block rate 2.9%</span>
+      </div>
+
+      <!-- feed -->
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="padding:16px 18px 14px;display:flex;align-items:center;justify-content:space-between">
+          <div class="card-title">Live Transaction Feed</div>
+          <div class="card-hint">click a row to see why</div>
+        </div>
+        <div class="feed-head"><span>Time</span><span>Amount</span><span>Risk Score</span><span>Verdict</span><span>Latency</span></div>
+
+        <!-- expanded fraud row -->
+        <div class="feed-row fraud">
+          <span class="mono">12:25:14</span>
+          <span class="mono">₹8,940</span>
+          <span class="risk-cell hi"><b>100%</b><small>model 0.34%</small></span>
+          <span><span class="verdict v-fraud">FRAUD</span></span>
+          <span class="mono">4.19</span>
+        </div>
+        <div class="why">
+          <div class="why-label">Why this score</div>
+          <div class="chips">
+            <span class="chip up lead"><span class="ar">⚡</span> velocity spike · 15 txns in 60s</span>
+            <span class="chip up"><span class="ar">↑</span> amount 8× user average</span>
+          </div>
+          <div class="chip-sub">Model signal (secondary)</div>
+          <div class="chips">
+            <span class="chip down"><span class="ar">↓</span> typical spend level</span>
+            <span class="chip down"><span class="ar">↓</span> familiar location</span>
+            <span class="chip down"><span class="ar">↓</span> established account</span>
+          </div>
+        </div>
+
+        <!-- other rows -->
+        <div class="feed-row ok"><span class="mono">12:25:09</span><span class="mono">₹1,204</span><span class="risk-cell"><b>2%</b><small>model 2.1%</small></span><span><span class="verdict v-ok">OK</span></span><span class="mono">1.98</span></div>
+        <div class="feed-row ok"><span class="mono">12:25:03</span><span class="mono">₹549</span><span class="risk-cell"><b>0%</b><small>model 0.4%</small></span><span><span class="verdict v-ok">OK</span></span><span class="mono">2.11</span></div>
+        <div class="feed-row fraud"><span class="mono">12:24:57</span><span class="mono">₹14,300</span><span class="risk-cell hi"><b>97%</b><small>model 96.8%</small></span><span><span class="verdict v-fraud">FRAUD</span></span><span class="mono">2.44</span></div>
+        <div class="feed-row ok"><span class="mono">12:24:51</span><span class="mono">₹2,780</span><span class="risk-cell"><b>4%</b><small>model 3.9%</small></span><span><span class="verdict v-ok">OK</span></span><span class="mono">1.87</span></div>
+        <div class="feed-row ok"><span class="mono">12:24:45</span><span class="mono">₹899</span><span class="risk-cell"><b>1%</b><small>model 0.9%</small></span><span><span class="verdict v-ok">OK</span></span><span class="mono">2.05</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+</body>
+</html>
